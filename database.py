@@ -19,7 +19,7 @@ class Database:
     async def connect(self):
         self.pool = await asyncpg.create_pool(
             dsn=os.environ.get("DATABASE_URL"),
-            min_size=2,
+            min_size=1,
             max_size=10
         )
         print("✅ Database connected")
@@ -43,7 +43,7 @@ class Database:
 
                 CREATE TABLE IF NOT EXISTS resumes (
                     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-                    user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+                    user_id TEXT REFERENCES users(id) ON DELETE CASCADE UNIQUE,
                     raw_text TEXT,
                     profile JSONB,
                     updated_at TIMESTAMPTZ DEFAULT NOW()

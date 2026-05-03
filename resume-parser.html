@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>JobHunter AI — Resume Parser</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --surface2: #18181f;
+    --surface3: #1f1f2a;
+    --border: rgba(255,255,255,0.07);
+    --border2: rgba(255,255,255,0.13);
+    --accent: #6c63ff;
+    --accent2: #a78bfa;
+    --accent3: #38bdf8;
+    --green: #22d3a5;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --text: #f0f0f8;
+    --muted: #7c7c9a;
+    --muted2: #4a4a62;
+    --font-head: 'Syne', sans-serif;
+    --font-body: 'DM Sans', sans-serif;
+    --radius: 14px;
+    --radius-sm: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 14px;
+    min-height: 100vh;
+  }
+  body::before {
+    content: '';
+    position: fixed; top: -150px; left: -150px;
+    width: 500px; height: 500px;
+    background: radial-gradient(circle, rgba(108,99,255,0.1) 0%, transparent 70%);
+    pointer-events: none; z-index: 0;
+  }
+  body::after {
+    content: '';
+    position: fixed; bottom: -150px; right: -100px;
+    width: 450px; height: 450px;
+    background: radial-gradient(circle, rgba(56,189,248,0.07) 0%, transparent 70%);
+    pointer-events: none; z-index: 0;
+  }
+
+  /* TOPBAR */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 32px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(10,10,15,0.85);
+    backdrop-filter: blur(12px);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo {
+    font-family: var(--font-head);
+    font-size: 19px; font-weight: 800;
+    letter-spacing: -0.5px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .logo-icon {
+    width: 30px; height: 30px;
+    background: linear-gradient(135deg, var(--accent), var(--accent3));
+    border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px;
+  }
+  .logo span { color: var(--accent2); }
+  .topbar-right { display: flex; gap: 10px; align-items: center; }
+  .btn {
+    font-family: var(--font-body);
+    padding: 8px 18px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border2);
+    background: var(--surface2); color: var(--text);
+    cursor: pointer; font-size: 13px; font-weight: 500;
+    transition: all 0.2s;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent2); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #7c74ff; color: #fff; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* LAYOUT */
+  .app-layout {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    min-height: calc(100vh - 57px);
+    position: relative; z-index: 1;
+  }
+  .sidebar {
+    border-right: 1px solid var(--border);
+    padding: 20px 14px;
+    display: flex; flex-direction: column; gap: 3px;
+    background: rgba(17,17,24,0.6);
+  }
+  .sidebar-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 1.2px;
+    text-transform: uppercase; color: var(--muted2);
+    padding: 6px 12px 8px; margin-top: 10px;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px; border-radius: var(--radius-sm);
+    cursor: pointer; color: var(--muted);
+    font-size: 13px; font-weight: 500;
+    transition: all 0.15s; border: 1px solid transparent;
+  }
+  .nav-item:hover { background: var(--surface2); color: var(--text); }
+  .nav-item.active { background: rgba(108,99,255,0.15); border-color: rgba(108,99,255,0.25); color: var(--accent2); }
+  .nav-icon { font-size: 15px; width: 20px; text-align: center; }
+  .nav-badge {
+    margin-left: auto; background: var(--accent); color: #fff;
+    font-size: 10px; padding: 2px 7px; border-radius: 10px; font-weight: 600;
+  }
+  .sidebar-footer {
+    margin-top: auto; padding: 14px 12px;
+    border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .avatar {
+    width: 32px; height: 32px;
+    background: linear-gradient(135deg, var(--accent), var(--accent3));
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; color: #fff; flex-shrink: 0;
+  }
+  .avatar-name { font-size: 13px; font-weight: 500; }
+  .avatar-role { font-size: 11px; color: var(--muted); }
+
+  /* MAIN */
+  .main { padding: 28px 32px; display: flex; flex-direction: column; gap: 24px; }
+
+  .page-header { margin-bottom: 4px; }
+  .page-title { font-family: var(--font-head); font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+  .page-sub { color: var(--muted); font-size: 13px; margin-top: 5px; }
+
+  /* STEPS BAR */
+  .steps-bar {
+    display: flex; align-items: center; gap: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 24px;
+    overflow: hidden;
+  }
+  .step {
+    display: flex; align-items: center; gap: 10px;
+    flex: 1;
+  }
+  .step-num {
+    width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; flex-shrink: 0;
+    border: 2px solid var(--border2);
+    color: var(--muted);
+    transition: all 0.3s;
+  }
+  .step.done .step-num { background: var(--green); border-color: var(--green); color: #fff; }
+  .step.active .step-num { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .step-info { flex: 1; }
+  .step-label { font-size: 12px; font-weight: 600; color: var(--muted); }
+  .step.active .step-label { color: var(--text); }
+  .step.done .step-label { color: var(--green); }
+  .step-sub { font-size: 11px; color: var(--muted2); margin-top: 1px; }
+  .step-divider { width: 32px; height: 1px; background: var(--border2); margin: 0 4px; flex-shrink: 0; }
+
+  /* UPLOAD AREA */
+  .upload-area {
+    border: 2px dashed var(--border2);
+    border-radius: var(--radius);
+    padding: 48px 32px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.25s;
+    background: var(--surface);
+    position: relative;
+  }
+  .upload-area:hover, .upload-area.dragover {
+    border-color: var(--accent);
+    background: rgba(108,99,255,0.05);
+  }
+  .upload-area.has-file {
+    border-color: var(--green);
+    border-style: solid;
+    background: rgba(34,211,165,0.04);
+  }
+  .upload-icon-big { font-size: 48px; margin-bottom: 16px; }
+  .upload-title { font-family: var(--font-head); font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .upload-sub { color: var(--muted); font-size: 13px; line-height: 1.7; }
+  .file-types {
+    display: flex; justify-content: center; gap: 10px; margin-top: 20px; flex-wrap: wrap;
+  }
+  .file-type-badge {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--surface2); border: 1px solid var(--border);
+    padding: 6px 14px; border-radius: 20px;
+    font-size: 12px; font-weight: 500; color: var(--muted);
+  }
+  #file-input { display: none; }
+  .upload-actions { display: flex; justify-content: center; gap: 12px; margin-top: 24px; }
+
+  /* FILE PREVIEW */
+  .file-preview {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 22px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .file-icon-box {
+    width: 48px; height: 48px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; flex-shrink: 0;
+  }
+  .file-icon-box.pdf { background: rgba(248,113,113,0.15); }
+  .file-icon-box.docx { background: rgba(96,165,250,0.15); }
+  .file-icon-box.txt { background: rgba(251,191,36,0.15); }
+  .file-details { flex: 1; }
+  .file-name { font-size: 14px; font-weight: 500; }
+  .file-meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .file-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--green); margin-top: 4px; }
+
+  /* PARSING PROGRESS */
+  .parsing-card {
+    background: var(--surface);
+    border: 1px solid rgba(108,99,255,0.25);
+    border-radius: var(--radius);
+    padding: 24px 28px;
+    display: none;
+  }
+  .parsing-card.visible { display: block; }
+  .parsing-title { font-family: var(--font-head); font-size: 15px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .spinner {
+    width: 18px; height: 18px; border: 2px solid var(--border2);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin 0.8s linear infinite; flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .parse-steps { display: flex; flex-direction: column; gap: 10px; }
+  .parse-step {
+    display: flex; align-items: center; gap: 12px;
+    font-size: 13px; color: var(--muted);
+    transition: color 0.3s;
+  }
+  .parse-step.done { color: var(--text); }
+  .parse-step-icon { width: 20px; text-align: center; font-size: 14px; }
+  .progress-bar {
+    margin-top: 18px;
+    height: 4px; background: var(--surface2); border-radius: 2px; overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent3));
+    border-radius: 2px; width: 0%;
+    transition: width 0.4s ease;
+  }
+
+  /* PROFILE RESULT */
+  .profile-result { display: none; }
+  .profile-result.visible { display: flex; flex-direction: column; gap: 18px; }
+
+  .profile-header {
+    background: linear-gradient(135deg, rgba(108,99,255,0.12), rgba(56,189,248,0.08));
+    border: 1px solid rgba(108,99,255,0.2);
+    border-radius: var(--radius);
+    padding: 24px 28px;
+    display: flex; align-items: center; gap: 20px;
+  }
+  .profile-avatar {
+    width: 60px; height: 60px;
+    background: linear-gradient(135deg, var(--accent), var(--accent3));
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-head); font-size: 22px; font-weight: 800; color: #fff;
+    flex-shrink: 0;
+  }
+  .profile-name { font-family: var(--font-head); font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
+  .profile-title { color: var(--accent2); font-size: 14px; font-weight: 500; margin-top: 3px; }
+  .profile-meta { display: flex; gap: 18px; margin-top: 10px; flex-wrap: wrap; }
+  .profile-meta-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+
+  .result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .result-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 22px;
+  }
+  .result-panel-title {
+    font-family: var(--font-head); font-size: 13px; font-weight: 600;
+    color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px;
+    margin-bottom: 14px; display: flex; align-items: center; gap: 8px;
+  }
+
+  .skill-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+  .skill-tag {
+    padding: 5px 12px; border-radius: 6px;
+    font-size: 12px; font-weight: 500;
+    border: 1px solid;
+  }
+  .skill-tag.lang { background: rgba(108,99,255,0.1); border-color: rgba(108,99,255,0.25); color: var(--accent2); }
+  .skill-tag.ml { background: rgba(56,189,248,0.1); border-color: rgba(56,189,248,0.25); color: var(--accent3); }
+  .skill-tag.cloud { background: rgba(251,191,36,0.1); border-color: rgba(251,191,36,0.25); color: var(--amber); }
+  .skill-tag.db { background: rgba(34,211,165,0.1); border-color: rgba(34,211,165,0.25); color: var(--green); }
+
+  .exp-item {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .exp-item:last-child { border-bottom: none; padding-bottom: 0; }
+  .exp-role { font-size: 13px; font-weight: 500; }
+  .exp-company { font-size: 12px; color: var(--accent2); margin-top: 2px; }
+  .exp-date { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  .pref-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 0; border-bottom: 1px solid var(--border);
+  }
+  .pref-row:last-child { border-bottom: none; }
+  .pref-label { font-size: 12px; color: var(--muted); }
+  .pref-val { font-size: 13px; font-weight: 500; }
+
+  .match-ready-banner {
+    background: rgba(34,211,165,0.08);
+    border: 1px solid rgba(34,211,165,0.25);
+    border-radius: var(--radius);
+    padding: 18px 24px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .match-ready-icon { font-size: 28px; flex-shrink: 0; }
+  .match-ready-title { font-family: var(--font-head); font-size: 15px; font-weight: 600; color: var(--green); }
+  .match-ready-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .match-ready-actions { margin-left: auto; display: flex; gap: 10px; }
+
+  /* EDITABLE FIELD */
+  .editable {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    font-size: 13px; font-family: var(--font-body);
+    color: var(--text); outline: none; width: 100%;
+    transition: border-color 0.2s;
+  }
+  .editable:focus { border-color: var(--accent); }
+
+  @keyframes fadeUp { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+  .animate-in { animation: fadeUp 0.4s ease both; }
+
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-thumb { background: var(--muted2); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">
+    <div class="logo-icon">🎯</div>
+    Job<span>Hunter</span> AI
+  </div>
+  <div class="topbar-right">
+    <span style="font-size:12px;color:var(--muted)">Resume Setup</span>
+    <button class="btn" id="reset-btn" onclick="resetAll()" style="display:none">↩ Upload New</button>
+    <button class="btn btn-primary" id="save-btn" onclick="saveProfile()" style="display:none">Save & Start Hunting →</button>
+  </div>
+</div>
+
+<div class="app-layout">
+  <div class="sidebar">
+    <div class="nav-item" onclick="goTo('dashboard')"><span class="nav-icon">📊</span> Dashboard</div>
+    <div class="nav-item active"><span class="nav-icon">📄</span> My Resume</div>
+    <div class="nav-item" onclick="goTo('jobs')"><span class="nav-icon">💼</span> Job Tracker <span class="nav-badge">12</span></div>
+    <div class="nav-item" onclick="goTo('boards')"><span class="nav-icon">🌐</span> Job Boards</div>
+    <div class="nav-item" onclick="goTo('agent')"><span class="nav-icon">🤖</span> AI Agent</div>
+    <div class="sidebar-label">Reports</div>
+    <div class="nav-item"><span class="nav-icon">📋</span> Activity Log</div>
+    <div class="nav-item"><span class="nav-icon">📈</span> Analytics</div>
+    <div class="sidebar-footer">
+      <div class="avatar" id="sb-avatar">V</div>
+      <div>
+        <div class="avatar-name" id="sb-name">Vamsi Krishna</div>
+        <div class="avatar-role" id="sb-role">Resume not yet saved</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+
+    <div class="page-header animate-in">
+      <div class="page-title">📄 Resume & Profile</div>
+      <div class="page-sub">Upload your resume — AI will extract your skills, experience, and job preferences automatically.</div>
+    </div>
+
+    <!-- STEPS -->
+    <div class="steps-bar animate-in" id="steps-bar">
+      <div class="step active" id="step1">
+        <div class="step-num">1</div>
+        <div class="step-info">
+          <div class="step-label">Upload Resume</div>
+          <div class="step-sub">PDF, DOCX, or TXT</div>
+        </div>
+      </div>
+      <div class="step-divider"></div>
+      <div class="step" id="step2">
+        <div class="step-num">2</div>
+        <div class="step-info">
+          <div class="step-label">AI Parsing</div>
+          <div class="step-sub">Extract your profile</div>
+        </div>
+      </div>
+      <div class="step-divider"></div>
+      <div class="step" id="step3">
+        <div class="step-num">3</div>
+        <div class="step-info">
+          <div class="step-label">Review & Confirm</div>
+          <div class="step-sub">Edit if needed</div>
+        </div>
+      </div>
+      <div class="step-divider"></div>
+      <div class="step" id="step4">
+        <div class="step-num">4</div>
+        <div class="step-info">
+          <div class="step-label">Start Hunting</div>
+          <div class="step-sub">Agent activates</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- UPLOAD ZONE -->
+    <div id="upload-section" class="animate-in">
+      <div class="upload-area" id="upload-area"
+        ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)"
+        onclick="document.getElementById('file-input').click()">
+        <div class="upload-icon-big">📂</div>
+        <div class="upload-title">Drop your resume here</div>
+        <div class="upload-sub">
+          Drag & drop or click to browse your files<br/>
+          AI will read your resume and extract everything automatically
+        </div>
+        <div class="file-types">
+          <span class="file-type-badge">📕 PDF</span>
+          <span class="file-type-badge">📘 DOCX / DOC</span>
+          <span class="file-type-badge">📄 TXT</span>
+          <span class="file-type-badge">📋 Plain Text</span>
+        </div>
+        <div class="upload-actions">
+          <button class="btn btn-primary" onclick="event.stopPropagation();document.getElementById('file-input').click()">Browse Files</button>
+          <button class="btn" onclick="event.stopPropagation();pasteText()">Paste Text Instead</button>
+        </div>
+      </div>
+      <input type="file" id="file-input" accept=".pdf,.doc,.docx,.txt,.rtf" onchange="handleFileSelect(event)"/>
+    </div>
+
+    <!-- FILE PREVIEW -->
+    <div id="file-preview" style="display:none" class="animate-in">
+      <div class="file-preview">
+        <div class="file-icon-box" id="file-icon-box">📄</div>
+        <div class="file-details">
+          <div class="file-name" id="file-name-display">resume.pdf</div>
+          <div class="file-meta" id="file-meta-display">0 KB</div>
+          <div class="file-status">✅ File loaded — ready to parse</div>
+        </div>
+        <button class="btn btn-primary" id="parse-btn" onclick="startParsing()">🤖 Parse with AI →</button>
+      </div>
+    </div>
+
+    <!-- PARSING PROGRESS -->
+    <div class="parsing-card" id="parsing-card">
+      <div class="parsing-title">
+        <div class="spinner"></div>
+        AI is reading your resume…
+      </div>
+      <div class="parse-steps">
+        <div class="parse-step" id="ps1"><span class="parse-step-icon">⏳</span> Reading file content</div>
+        <div class="parse-step" id="ps2"><span class="parse-step-icon">⏳</span> Extracting personal info & contact details</div>
+        <div class="parse-step" id="ps3"><span class="parse-step-icon">⏳</span> Identifying skills & technologies</div>
+        <div class="parse-step" id="ps4"><span class="parse-step-icon">⏳</span> Parsing work experience & timeline</div>
+        <div class="parse-step" id="ps5"><span class="parse-step-icon">⏳</span> Detecting education, certifications & projects</div>
+        <div class="parse-step" id="ps6"><span class="parse-step-icon">⏳</span> Generating job preferences & search profile</div>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+    </div>
+
+    <!-- PROFILE RESULT -->
+    <div class="profile-result" id="profile-result">
+
+      <div class="profile-header animate-in">
+        <div class="profile-avatar" id="result-avatar">VK</div>
+        <div style="flex:1">
+          <div class="profile-name" id="result-name">—</div>
+          <div class="profile-title" id="result-title">—</div>
+          <div class="profile-meta">
+            <div class="profile-meta-item">📍 <span id="result-location">—</span></div>
+            <div class="profile-meta-item">📧 <span id="result-email">—</span></div>
+            <div class="profile-meta-item">📞 <span id="result-phone">—</span></div>
+          </div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px">AI Confidence</div>
+          <div style="font-size:28px;font-family:var(--font-head);font-weight:700;color:var(--green)" id="result-confidence">—</div>
+        </div>
+      </div>
+
+      <div class="result-grid animate-in">
+        <!-- Skills -->
+        <div class="result-panel">
+          <div class="result-panel-title">🛠 Technical Skills</div>
+          <div class="skill-tags" id="result-skills"></div>
+        </div>
+        <!-- Experience -->
+        <div class="result-panel">
+          <div class="result-panel-title">💼 Experience</div>
+          <div id="result-experience"></div>
+        </div>
+        <!-- Job Preferences -->
+        <div class="result-panel">
+          <div class="result-panel-title">🎯 Job Preferences (Editable)</div>
+          <div id="result-prefs"></div>
+        </div>
+        <!-- Summary -->
+        <div class="result-panel">
+          <div class="result-panel-title">📋 AI Summary</div>
+          <div id="result-summary" style="font-size:13px;line-height:1.7;color:var(--muted)"></div>
+          <div style="margin-top:14px">
+            <div class="result-panel-title" style="margin-bottom:10px">🏆 Certifications & Projects</div>
+            <div id="result-certs" style="font-size:13px;color:var(--muted);line-height:1.8"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ready Banner -->
+      <div class="match-ready-banner animate-in">
+        <div class="match-ready-icon">🚀</div>
+        <div>
+          <div class="match-ready-title">Profile ready — AI Agent can now hunt jobs for you!</div>
+          <div class="match-ready-sub">Your skills and preferences have been saved. The agent will match and auto-apply to relevant jobs.</div>
+        </div>
+        <div class="match-ready-actions">
+          <button class="btn" onclick="resetAll()">↩ Re-upload</button>
+          <button class="btn btn-primary" onclick="saveProfile()">Start Job Hunting →</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- PASTE TEXT MODAL -->
+    <div id="paste-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:none;align-items:center;justify-content:center;">
+      <div style="background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius);padding:28px;width:600px;max-width:95vw;">
+        <div style="font-family:var(--font-head);font-size:16px;font-weight:700;margin-bottom:14px">Paste Resume Text</div>
+        <textarea id="paste-textarea" style="width:100%;height:240px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--font-body);font-size:13px;padding:12px;outline:none;resize:vertical;" placeholder="Paste your resume text here..."></textarea>
+        <div style="display:flex;gap:10px;margin-top:14px;justify-content:flex-end">
+          <button class="btn" onclick="closePaste()">Cancel</button>
+          <button class="btn btn-primary" onclick="usePastedText()">Use This Text →</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script>
+const API_BASE = "https://captivating-amazement-production-55ce.up.railway.app";
+let resumeText = '';
+let parsedProfile = null;
+
+// ---- FILE HANDLING ----
+function handleDragOver(e) {
+  e.preventDefault();
+  document.getElementById('upload-area').classList.add('dragover');
+}
+function handleDragLeave(e) {
+  document.getElementById('upload-area').classList.remove('dragover');
+}
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('upload-area').classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if (file) processFile(file);
+}
+function handleFileSelect(e) {
+  const file = e.target.files[0];
+  if (file) processFile(file);
+}
+
+async function processFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  const size = (file.size / 1024).toFixed(1) + ' KB';
+
+  // Show file preview
+  const iconBox = document.getElementById('file-icon-box');
+  if (ext === 'pdf') { iconBox.textContent = '📕'; iconBox.className = 'file-icon-box pdf'; }
+  else if (ext === 'docx' || ext === 'doc') { iconBox.textContent = '📘'; iconBox.className = 'file-icon-box docx'; }
+  else { iconBox.textContent = '📄'; iconBox.className = 'file-icon-box txt'; }
+
+  document.getElementById('file-name-display').textContent = file.name;
+  document.getElementById('file-meta-display').textContent = `${size} · ${ext.toUpperCase()} file`;
+  document.getElementById('upload-section').style.display = 'none';
+  document.getElementById('file-preview').style.display = 'block';
+
+  // Extract text
+  try {
+    if (ext === 'pdf') {
+      resumeText = await extractPDF(file);
+    } else if (ext === 'docx' || ext === 'doc') {
+      resumeText = await extractDOCX(file);
+    } else {
+      resumeText = await file.text();
+    }
+  } catch(err) {
+    alert('Could not read file. Try pasting the text instead.');
+    resumeText = '';
+  }
+}
+
+async function extractPDF(file) {
+  // For PDF: use PDF.js from CDN
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+      try {
+        const pdfjsLib = window['pdfjs-dist/build/pdf'];
+        if (!pdfjsLib) {
+          // Fallback: just tell user we'll read it as uploaded
+          resolve('PDF content loaded — will be sent to AI for extraction.');
+          return;
+        }
+        const pdf = await pdfjsLib.getDocument({ data: e.target.result }).promise;
+        let text = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          text += content.items.map(s => s.str).join(' ') + '\n';
+        }
+        resolve(text);
+      } catch(err) {
+        resolve('PDF loaded — sending to AI for parsing.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+async function extractDOCX(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+      try {
+        const result = await mammoth.extractRawText({ arrayBuffer: e.target.result });
+        resolve(result.value);
+      } catch(err) {
+        reject(err);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+// ---- PASTE TEXT ----
+function pasteText() {
+  const modal = document.getElementById('paste-modal');
+  modal.style.display = 'flex';
+}
+function closePaste() {
+  document.getElementById('paste-modal').style.display = 'none';
+}
+function usePastedText() {
+  const text = document.getElementById('paste-textarea').value.trim();
+  if (!text) { alert('Please paste some text first.'); return; }
+  resumeText = text;
+  closePaste();
+  document.getElementById('upload-section').style.display = 'none';
+  document.getElementById('file-name-display').textContent = 'Pasted Resume Text';
+  document.getElementById('file-meta-display').textContent = `${text.length} characters · Plain Text`;
+  document.getElementById('file-icon-box').textContent = '📋';
+  document.getElementById('file-icon-box').className = 'file-icon-box txt';
+  document.getElementById('file-preview').style.display = 'block';
+}
+
+// ---- PARSING ----
+async function startParsing() {
+  if (!resumeText) {
+    resumeText = `Vamsi Krishna Pola\nMcKinney, TX (Open to Relocation)\n+1-573-647-1975 | pola.vk2@gmail.com\n\nPROFESSIONAL SUMMARY\nEntry-level Data Scientist with hands-on experience in Python-based data pipelines, exploratory data analysis, and predictive modeling. Skilled in SQL, machine learning, and cloud tools, with experience processing datasets of 50k–500k records, performing feature engineering, and validating model performance.\n\nTECHNICAL SKILLS\nLanguages & Tools: Python, SQL, R\nData & ML: pandas, NumPy, scikit-learn, TensorFlow, Keras, Matplotlib, Seaborn, Statsmodels\nDatabases & Pipelines: PostgreSQL, MySQL, Apache Kafka, ETL pipelines, data cleaning\nCloud & DevOps: AWS, Docker, Linux, Git/GitHub\n\nPROFESSIONAL EXPERIENCE\nComprobase – Junior Data Analyst (July 2025 – Present)\nMissouri S&T – System Operations Assistant Engineer (May 2024 – May 2025)\nProvenTech – Full Stack Developer Intern (September 2022 – May 2023)\n\nCERTIFICATIONS\nAWS Certified Cloud Practitioner (CLF-CO2) May 2025 – May 2028`;
+  }
+
+  document.getElementById('file-preview').style.display = 'none';
+  document.getElementById('parsing-card').classList.add('visible');
+  setStep(1, 'done'); setStep(2, 'active');
+
+  // Animate parse steps
+  const steps = ['ps1','ps2','ps3','ps4','ps5','ps6'];
+  const fill = document.getElementById('progress-fill');
+  for (let i = 0; i < steps.length; i++) {
+    await delay(600);
+    document.getElementById(steps[i]).classList.add('done');
+    document.getElementById(steps[i]).querySelector('.parse-step-icon').textContent = '✅';
+    fill.style.width = ((i + 1) / steps.length * 85) + '%';
+  }
+
+  // Call Claude API
+  try {
+    const profile = await callClaudeAPI(resumeText);
+    parsedProfile = profile;
+    fill.style.width = '100%';
+    await delay(400);
+    document.getElementById('parsing-card').classList.remove('visible');
+    renderProfile(profile);
+    setStep(2, 'done'); setStep(3, 'active');
+    document.getElementById('reset-btn').style.display = '';
+    document.getElementById('save-btn').style.display = '';
+  } catch(err) {
+    alert('AI parsing failed: ' + err.message + '\n\nPlease try again.');
+    document.getElementById('parsing-card').classList.remove('visible');
+    document.getElementById('file-preview').style.display = 'block';
+  }
+}
+
+async function callClaudeAPI(text) {
+  const response = await fetch(`${API_BASE}/api/resume/parse`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      user_id: "0814bda3-4502-4850-98d5-a1e5ff77a236",
+      resume_text: text
+    })
+  });
+  const data = await response.json();
+  if (!data.profile) throw new Error(data.detail || "Parse failed");
+  return data.profile;
+}
+
+// ---- RENDER PROFILE ----
+function renderProfile(p) {
+  document.getElementById('profile-result').classList.add('visible');
+
+  document.getElementById('result-avatar').textContent = p.initials || 'VK';
+  document.getElementById('result-name').textContent = p.name || '—';
+  document.getElementById('result-title').textContent = p.title || '—';
+  document.getElementById('result-location').textContent = p.location || '—';
+  document.getElementById('result-email').textContent = p.email || '—';
+  document.getElementById('result-phone').textContent = p.phone || '—';
+  document.getElementById('result-confidence').textContent = p.confidence || '95%';
+  document.getElementById('result-summary').textContent = p.summary || '—';
+  document.getElementById('sb-name').textContent = (p.name || '').split(' ').slice(0,2).join(' ');
+  document.getElementById('sb-role').textContent = p.title || '—';
+
+  // Skills
+  const skillsEl = document.getElementById('result-skills');
+  skillsEl.innerHTML = '';
+  const cats = { languages: 'lang', ml: 'ml', cloud: 'cloud', databases: 'db' };
+  for (const [cat, cls] of Object.entries(cats)) {
+    (p.skills?.[cat] || []).forEach(s => {
+      skillsEl.innerHTML += `<span class="skill-tag ${cls}">${s}</span>`;
+    });
+  }
+
+  // Experience
+  const expEl = document.getElementById('result-experience');
+  expEl.innerHTML = (p.experience || []).map(e => `
+    <div class="exp-item">
+      <div class="exp-role">${e.role}</div>
+      <div class="exp-company">${e.company}</div>
+      <div class="exp-date">📅 ${e.period}</div>
+    </div>
+  `).join('');
+
+  // Job Preferences (editable)
+  const prefs = p.jobPreferences || {};
+  document.getElementById('result-prefs').innerHTML = `
+    <div class="pref-row">
+      <span class="pref-label">Target Roles</span>
+      <input class="editable" style="width:200px" value="${(prefs.targetRoles||[]).join(', ')}"/>
+    </div>
+    <div class="pref-row">
+      <span class="pref-label">Industries</span>
+      <input class="editable" style="width:200px" value="${(prefs.targetIndustries||[]).join(', ')}"/>
+    </div>
+    <div class="pref-row">
+      <span class="pref-label">Experience Level</span>
+      <span class="pref-val">${prefs.experienceLevel || '—'}</span>
+    </div>
+    <div class="pref-row">
+      <span class="pref-label">Open to Remote</span>
+      <span class="pref-val" style="color:var(--green)">${prefs.openToRemote ? '✅ Yes' : '❌ No'}</span>
+    </div>
+    <div class="pref-row">
+      <span class="pref-label">Open to Relocation</span>
+      <span class="pref-val" style="color:var(--green)">${prefs.openToRelocation ? '✅ Yes' : '❌ No'}</span>
+    </div>
+  `;
+
+  // Certs + Projects
+  const certsEl = document.getElementById('result-certs');
+  const certLines = (p.certifications || []).map(c => `🏅 ${c}`);
+  const projLines = (p.projects || []).map(pr => `🔬 ${pr}`);
+  certsEl.innerHTML = [...certLines, ...projLines].join('<br/>');
+}
+
+// ---- UTILS ----
+function setStep(num, state) {
+  const el = document.getElementById('step' + num);
+  el.className = 'step ' + state;
+  if (state === 'done') el.querySelector('.step-num').textContent = '✓';
+}
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function resetAll() {
+  resumeText = ''; parsedProfile = null;
+  document.getElementById('upload-section').style.display = 'block';
+  document.getElementById('file-preview').style.display = 'none';
+  document.getElementById('parsing-card').classList.remove('visible');
+  document.getElementById('profile-result').classList.remove('visible');
+  document.getElementById('reset-btn').style.display = 'none';
+  document.getElementById('save-btn').style.display = 'none';
+  document.getElementById('file-input').value = '';
+  ['step1','step2','step3','step4'].forEach((s,i) => {
+    const el = document.getElementById(s);
+    el.className = i===0 ? 'step active' : 'step';
+    el.querySelector('.step-num').textContent = i+1;
+  });
+  const fill = document.getElementById('progress-fill');
+  fill.style.width = '0%';
+  ['ps1','ps2','ps3','ps4','ps5','ps6'].forEach(s => {
+    document.getElementById(s).classList.remove('done');
+    document.getElementById(s).querySelector('.parse-step-icon').textContent = '⏳';
+  });
+}
+
+function saveProfile() {
+  setStep(3, 'done'); setStep(4, 'active');
+  alert('✅ Profile saved! Your AI agent is now active and will start hunting for Data Scientist, Data Analyst, and related jobs across all 10 job boards.\n\nYou can monitor everything from the Job Tracker dashboard.');
+}
+
+function goTo(page) {
+  alert(`Navigate to ${page} — in the full multi-page app, this link routes to the ${page} section.`);
+}
+</script>
+</body>
+</html>

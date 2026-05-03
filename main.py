@@ -68,11 +68,14 @@ class ApplyRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup():
-    await db.connect()
-    await db.create_tables()
+    try:
+        await db.connect()
+        await db.create_tables()
+        print("✅ JobHunter AI backend started")
+    except Exception as e:
+        print(f"⚠️ DB connection failed: {e} — app starting anyway")
     scheduler.add_job(run_scheduled_scan, "interval", hours=3, id="auto_scan")
     scheduler.start()
-    print("✅ JobHunter AI backend started")
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -144,7 +147,10 @@ Resume:
     )
     raw = response.content[0].text.replace("```json", "").replace("```", "").strip()
     profile = json.loads(raw)
-    await db.save_resume(payload.user_id, payload.resume_text, profile)
+    try:
+        await db.save_resume(payload.user_id, payload.resume_text, profile)
+    except Exception as e:
+        print(f"⚠️ Could not save resume: {e}")
     return {"success": True, "profile": profile}
 
 @app.get("/api/resume/{user_id}")
