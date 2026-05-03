@@ -152,7 +152,7 @@ If you're building something similar and get stuck, feel free to open an issue. 
 
 ## Live Demo
 
-Backend API: https://captivating-amazement-production-55ce.up.railway.app  
+Backend API: https://jobhunter-api.up.railway.app
 API Docs: https://captivating-amazement-production-55ce.up.railway.app/docs
 
 ---
