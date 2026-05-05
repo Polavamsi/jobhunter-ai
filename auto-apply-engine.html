@@ -190,15 +190,15 @@
 
 <div class="app-layout">
   <div class="sidebar">
-    <div class="nav-item"><span class="nav-icon">📊</span> Dashboard</div>
-    <div class="nav-item"><span class="nav-icon">📄</span> My Resume</div>
-    <div class="nav-item"><span class="nav-icon">🔍</span> Job Scraper</div>
+    <div class="nav-item" onclick="window.location.href='index.html'"><span class="nav-icon">📊</span> Dashboard</div>
+    <div class="nav-item" onclick="window.location.href='resume-parser.html'"><span class="nav-icon">📄</span> My Resume</div>
+    <div class="nav-item" onclick="window.location.href='job-scraper.html'"><span class="nav-icon">🔍</span> Job Scraper</div>
     <div class="nav-item"><span class="nav-icon">💼</span> Job Tracker <span class="nav-badge" id="sb-count">0</span></div>
-    <div class="nav-item active"><span class="nav-icon">🤖</span> AI Agent</div>
+    <div class="nav-item" onclick="window.location.href='auto-apply-engine.html'"><span class="nav-icon">🤖</span> AI Agent</div>
     <div class="sidebar-label">Reports</div>
     <div class="nav-item"><span class="nav-icon">📋</span> Activity Log</div>
     <div class="nav-item"><span class="nav-icon">📈</span> Analytics</div>
-    <div class="sidebar-footer">
+    <div class="sidebar-footer"><div style="padding:10px 12px;margin-top:8px"><button onclick="sessionStorage.clear();window.location.href='auth.html'" style="width:100%;background:none;border:1px solid rgba(255,255,255,0.07);color:#7c7c9a;padding:7px;border-radius:6px;cursor:pointer;font-size:12px">Sign Out</button></div>
       <div class="avatar">VK</div>
       <div>
         <div style="font-size:13px;font-weight:500">Vamsi Krishna</div>
@@ -365,7 +365,11 @@
 @keyframes spin { to { transform:rotate(360deg); } }
 
 <script>
-const API_BASE = "https://captivating-amazement-production-55ce.up.railway.app";
+// Check if logged in
+const USER_ID = sessionStorage.getItem("user_id");
+const USER_NAME = sessionStorage.getItem("user_name");
+if (!USER_ID) window.location.href = "auth.html";
+const API_BASE = "https://jobhunter-api.up.railway.app";
 const boards = [
   { name:"LinkedIn", icon:"💼", count:0, status:"idle" },
   { name:"Indeed", icon:"🔍", count:0, status:"idle" },

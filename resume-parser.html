@@ -375,15 +375,15 @@
 
 <div class="app-layout">
   <div class="sidebar">
-    <div class="nav-item" onclick="goTo('dashboard')"><span class="nav-icon">📊</span> Dashboard</div>
+    <div class="nav-item" onclick="window.location.href='index.html'"><span class="nav-icon">📊</span> Dashboard</div>
     <div class="nav-item active"><span class="nav-icon">📄</span> My Resume</div>
-    <div class="nav-item" onclick="goTo('jobs')"><span class="nav-icon">💼</span> Job Tracker <span class="nav-badge">12</span></div>
-    <div class="nav-item" onclick="goTo('boards')"><span class="nav-icon">🌐</span> Job Boards</div>
-    <div class="nav-item" onclick="goTo('agent')"><span class="nav-icon">🤖</span> AI Agent</div>
+    <div class="nav-item" onclick="window.location.href='job-scraper.html'"><span class="nav-icon">💼</span> Job Tracker <span class="nav-badge">12</span></div>
+    <div class="nav-item" onclick="window.location.href='job-scraper.html'"><span class="nav-icon">🌐</span> Job Boards</div>
+    <div class="nav-item" onclick="window.location.href='auto-apply-engine.html'"><span class="nav-icon">🤖</span> AI Agent</div>
     <div class="sidebar-label">Reports</div>
     <div class="nav-item"><span class="nav-icon">📋</span> Activity Log</div>
     <div class="nav-item"><span class="nav-icon">📈</span> Analytics</div>
-    <div class="sidebar-footer">
+    <div class="sidebar-footer"><div style="padding:10px 12px;margin-top:8px"><button onclick="sessionStorage.clear();window.location.href='auth.html'" style="width:100%;background:none;border:1px solid rgba(255,255,255,0.07);color:#7c7c9a;padding:7px;border-radius:6px;cursor:pointer;font-size:12px">Sign Out</button></div>
       <div class="avatar" id="sb-avatar">V</div>
       <div>
         <div class="avatar-name" id="sb-name">Vamsi Krishna</div>
@@ -568,7 +568,11 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
 <script>
-const API_BASE = "https://captivating-amazement-production-55ce.up.railway.app";
+// Check if logged in
+const USER_ID = sessionStorage.getItem("user_id");
+const USER_NAME = sessionStorage.getItem("user_name");
+if (!USER_ID) window.location.href = "auth.html";
+const API_BASE = "https://jobhunter-api.up.railway.app";
 let resumeText = '';
 let parsedProfile = null;
 
@@ -728,7 +732,7 @@ async function callClaudeAPI(text) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      user_id: "0814bda3-4502-4850-98d5-a1e5ff77a236",
+      user_id: USER_ID,
       resume_text: text
     })
   });
