@@ -420,27 +420,41 @@ const USER_ID = sessionStorage.getItem("user_id");
 const USER_NAME = sessionStorage.getItem("user_name");
 if (!USER_ID) window.location.href = "auth.html";
 const API_BASE = "https://jobhunter-api.up.railway.app";
-const userProfile = {
-  name: "Vamsi Krishna Pola",
-  title: "Data Scientist",
-  skills: ["Python", "SQL", "R", "pandas", "NumPy", "scikit-learn", "TensorFlow", "Keras", "AWS", "Docker", "PostgreSQL", "MySQL", "Apache Kafka", "ETL", "Machine Learning", "Data Visualization", "Git"],
-  experience: "1 year",
-  roles: ["Data Scientist", "Data Analyst", "Full Stack Developer", "ML Engineer"]
+
+// Load user profile from session
+let userProfile = {
+  name: USER_NAME || "User",
+  title: "",
+  skills: [],
+  experience: "",
+  roles: []
 };
 
+// Fetch real profile from backend on load
+async function loadProfile() {
+  try {
+    const res = await fetch(`${API_BASE}/api/resume/${USER_ID}`);
+    if (res.ok) {
+      const data = await res.json();
+      const profile = data.profile || {};
+      const skills = profile.skills || {};
+      userProfile = {
+        name: profile.name || USER_NAME,
+        title: profile.title || "",
+        skills: [...(skills.languages||[]), ...(skills.ml||[]), ...(skills.cloud||[]), ...(skills.databases||[])],
+        experience: (profile.experience||[]).length + " roles",
+        roles: (profile.jobPreferences||{}).targetRoles || []
+      };
+      // Update scan subtitle with real roles
+      const roleText = userProfile.roles.length > 0 ? userProfile.roles.join(", ") : "Software Engineer, Data Scientist";
+      document.getElementById("scan-sub").textContent = `Searching for ${roleText} · Remote + USA · Last 48 hrs`;
+    }
+  } catch(e) {
+    console.log("Could not load profile:", e);
+  }
+}
+loadProfile();
 
-const jobPool = [
-  { id:1, title:"Data Scientist", company:"Stripe", logo:"💳", color:"#4f46e5", board:"li", location:"Remote", salary:"$95k–$130k", posted:"2 hrs ago", isNew:true, desc:"We're looking for a Data Scientist to build ML models for fraud detection and payment optimization. You'll work with large-scale transaction data and deploy models to production.", skills:["Python","scikit-learn","SQL","TensorFlow","AWS","pandas"], match:0 },
-  { id:2, title:"Junior Data Analyst", company:"Notion", logo:"📝", color:"#059669", board:"in", location:"Remote (USA)", salary:"$75k–$95k", posted:"4 hrs ago", isNew:true, desc:"Join our analytics team to explore product usage data, build dashboards, and surface insights that shape our product roadmap. Strong SQL and Python skills required.", skills:["SQL","Python","pandas","Matplotlib","PostgreSQL","ETL"], match:0 },
-  { id:3, title:"ML Engineer – NLP", company:"Hugging Face", logo:"🤗", color:"#f59e0b", board:"an", location:"Remote", salary:"$110k–$145k", posted:"6 hrs ago", isNew:true, desc:"Build and deploy NLP models at scale. Work with transformer architectures, fine-tune LLMs, and build inference pipelines for production.", skills:["Python","TensorFlow","Keras","Docker","AWS","Git"], match:0 },
-  { id:4, title:"Full Stack Developer", company:"Vercel", logo:"▲", color:"#111827", board:"li", location:"Remote (USA)", salary:"$100k–$135k", posted:"8 hrs ago", isNew:false, desc:"Build frontend and backend systems for our deployment platform. React, Node.js, and database experience required. You'll own features end to end.", skills:["React","Node.js","PostgreSQL","AWS","Docker","Git"], match:0 },
-  { id:5, title:"Data Engineer", company:"Airbnb", logo:"🏠", color:"#dc2626", board:"gl", location:"San Francisco, CA / Remote", salary:"$105k–$140k", posted:"10 hrs ago", isNew:false, desc:"Design and maintain scalable data pipelines handling billions of events daily. Experience with Kafka, Spark, and cloud data warehouses required.", skills:["Python","Apache Kafka","SQL","AWS","ETL","PostgreSQL"], match:0 },
-  { id:6, title:"Data Scientist – Forecasting", company:"Uber", logo:"🚗", color:"#000000", board:"zi", location:"NYC / Remote", salary:"$115k–$150k", posted:"12 hrs ago", isNew:false, desc:"Build forecasting models for demand prediction, pricing optimization and supply-demand matching. Experience with time-series analysis strongly preferred.", skills:["Python","TensorFlow","scikit-learn","SQL","Statsmodels","pandas"], match:0 },
-  { id:7, title:"Business Data Analyst", company:"Shopify", logo:"🛍", color:"#22c55e", board:"in", location:"Remote (USA/Canada)", salary:"$80k–$105k", posted:"1 day ago", isNew:false, desc:"Analyze merchant and buyer data to identify growth opportunities. Build reports and dashboards. Partner with product and marketing teams.", skills:["SQL","Python","pandas","Seaborn","PostgreSQL","Git"], match:0 },
-  { id:8, title:"React Full Stack Engineer", company:"Linear", logo:"📐", color:"#5e6ad2", board:"li", location:"Remote", salary:"$120k–$155k", posted:"1 day ago", isNew:false, desc:"Build high-performance UI and backend services for our project management platform. Strong React and TypeScript skills required.", skills:["React","Node.js","PostgreSQL","Docker","AWS","Git"], match:0 },
-  { id:9, title:"Junior ML Engineer", company:"Scale AI", logo:"⚖️", color:"#7c3aed", board:"di", location:"San Francisco / Remote", salary:"$90k–$120k", posted:"1 day ago", isNew:false, desc:"Train and evaluate ML models for data annotation tasks. Work with computer vision and NLP pipelines in production.", skills:["Python","TensorFlow","Keras","scikit-learn","Docker","AWS"], match:0 },
-  { id:10, title:"Data Analyst – Marketing", company:"HubSpot", logo:"🧡", color:"#f97316", board:"gl", location:"Remote (USA)", salary:"$70k–$90k", posted:"2 days ago", isNew:false, desc:"Analyze campaign performance and customer journeys. Build automated reports. Partner with marketing and growth teams on A/B tests.", skills:["SQL","Python","pandas","Matplotlib","MySQL","Git"], match:0 },
-];
 
 let allJobs = [];
 let activeModal = null;
@@ -452,7 +466,7 @@ function toggleRole(el) {
   el.classList.toggle('off');
 }
 
-// ---- SCAN FLOW ----
+// ---- REAL SCAN FLOW ----
 async function startScan() {
   const btn = document.getElementById('scan-btn');
   const btn2 = document.getElementById('scan-btn2');
@@ -472,27 +486,55 @@ async function startScan() {
   const chips = document.querySelectorAll('.board-chip');
   const fill = document.getElementById('scan-fill');
 
-  for (let i = 0; i < chips.length; i++) {
-    chips[i].classList.add('scanning');
-    document.getElementById('scan-sub').textContent = `Scanning ${chips[i].dataset.board}…`;
-    fill.style.width = ((i+1)/chips.length*80)+'%';
-    await delay(400);
-    chips[i].classList.remove('scanning');
-    chips[i].classList.add('done');
-  }
+  // Animate chips while real scan runs in background
+  const chipAnim = (async () => {
+    for (let i = 0; i < chips.length; i++) {
+      chips[i].classList.add('scanning');
+      document.getElementById('scan-sub').textContent = `Scanning ${chips[i].dataset.board}…`;
+      fill.style.width = ((i+1)/chips.length*70)+'%';
+      await delay(600);
+      chips[i].classList.remove('scanning');
+      chips[i].classList.add('done');
+    }
+  })();
 
-  // AI Matching
-  document.getElementById('scan-sub').textContent = 'AI is scoring job matches…';
-  fill.style.width = '90%';
-  await matchJobsWithAI();
-  fill.style.width = '100%';
-  await delay(300);
+  try {
+    // Trigger real backend scan
+    await fetch(`${API_BASE}/api/scan/${USER_ID}`, { method: 'POST' });
+
+    // Wait for animation to finish
+    await chipAnim;
+
+    document.getElementById('scan-sub').textContent = 'AI is scoring job matches…';
+    fill.style.width = '85%';
+
+    // Poll for scan completion
+    let attempts = 0;
+    while (attempts < 20) {
+      await delay(3000);
+      const statusRes = await fetch(`${API_BASE}/api/scan/status/${USER_ID}`);
+      const status = await statusRes.json();
+      if (status.status === 'idle' || status.status === 'error') break;
+      attempts++;
+    }
+
+    fill.style.width = '100%';
+
+    // Load real jobs from database
+    await loadJobs();
+
+  } catch(err) {
+    console.error('Scan error:', err);
+    await chipAnim;
+    fill.style.width = '100%';
+    await loadJobs(); // Try to load any existing jobs
+  }
 
   // Done
   banner.className = 'scan-banner done animate-in';
   document.getElementById('scan-icon').textContent = '✅';
   document.getElementById('scan-title').textContent = `Scan complete — ${allJobs.length} jobs found & scored`;
-  document.getElementById('scan-sub').textContent = `${allJobs.filter(j=>j.match>=75).length} high matches ready for auto-apply`;
+  document.getElementById('scan-sub').textContent = `${allJobs.filter(j=>j.match>=75).length} high matches ready · Powered by Greenhouse & Lever APIs`;
   document.getElementById('scan-progress').style.display = 'none';
 
   updateStats();
@@ -506,57 +548,86 @@ async function startScan() {
   btn.textContent = '🔄 Re-scan';
 }
 
-async function matchJobsWithAI() {
+// Load real jobs from database
+async function loadJobs() {
   try {
-    const jobsText = jobPool.map((j,i) =>
-      `Job ${i+1}: ${j.title} at ${j.company}\nRequired skills: ${j.skills.join(', ')}\nDescription: ${j.desc.substring(0,200)}`
-    ).join('\n\n');
+    const res = await fetch(`${API_BASE}/api/jobs/${USER_ID}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const jobs = data.jobs || [];
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1000,
-        messages: [{
-          role: "user",
-          content: `You are a job matching AI. Score how well this candidate matches each job.
-
-Candidate Profile:
-- Name: ${userProfile.name}
-- Skills: ${userProfile.skills.join(', ')}
-- Experience: ${userProfile.experience}
-- Target roles: ${userProfile.roles.join(', ')}
-
-Jobs to score:
-${jobsText}
-
-Respond ONLY with a JSON array of objects, no markdown, no backticks:
-[{"id":1,"match":88,"reason":"Strong Python and ML skills match well"},{"id":2,...}]
-
-Score from 0-100. Be realistic. Entry-level candidate with strong Python/ML background.`
-        }]
-      })
-    });
-
-    const data = await response.json();
-    const raw = data.content.map(c=>c.text||'').join('');
-    const clean = raw.replace(/```json|```/g,'').trim();
-    const scores = JSON.parse(clean);
-
-    allJobs = jobPool.map(j => {
-      const score = scores.find(s => s.id === j.id);
-      return { ...j, match: score ? score.match : Math.floor(Math.random()*30+50), reason: score ? score.reason : '' };
-    }).sort((a,b) => b.match - a.match);
+    allJobs = jobs.map((j, idx) => ({
+      id: j.id,
+      external_id: j.external_id,
+      title: j.title,
+      company: j.company,
+      logo: getCompanyEmoji(j.company),
+      color: getCompanyColor(idx),
+      board: j.board || 'Greenhouse',
+      location: j.location || 'Remote',
+      salary: j.salary || '',
+      posted: j.found_at ? timeAgo(j.found_at) : 'Recently',
+      isNew: j.is_new || false,
+      desc: j.description || '',
+      skills: j.skills || [],
+      match: j.match_score || 0,
+      reason: j.match_reason || '',
+      url: j.job_url || '',
+      status: j.status || 'found'
+    })).sort((a, b) => b.match - a.match);
 
   } catch(err) {
-    // Fallback scores if API fails
-    allJobs = jobPool.map(j => ({
-      ...j,
-      match: Math.floor(Math.random()*35+55),
-      reason: 'AI scoring unavailable — estimated match based on skill overlap.'
-    })).sort((a,b) => b.match - a.match);
+    console.error('Could not load jobs:', err);
   }
+}
+
+// Load existing jobs on page load
+window.addEventListener('load', async () => {
+  await loadProfile();
+  const res = await fetch(`${API_BASE}/api/jobs/${USER_ID}`).catch(() => null);
+  if (res && res.ok) {
+    const data = await res.json();
+    if (data.jobs && data.jobs.length > 0) {
+      await loadJobs();
+      updateStats();
+      renderJobs(allJobs);
+      document.getElementById('stats-row').style.display = 'grid';
+      document.getElementById('jobs-section').style.display = 'block';
+      document.getElementById('empty-state').style.display = 'none';
+      document.getElementById('apply-all-btn').style.display = '';
+      document.getElementById('sb-badge').textContent = allJobs.length;
+      const banner = document.getElementById('scan-banner');
+      banner.className = 'scan-banner done animate-in';
+      document.getElementById('scan-icon').textContent = '✅';
+      document.getElementById('scan-title').textContent = `${allJobs.length} jobs found & scored`;
+      document.getElementById('scan-sub').textContent = `${allJobs.filter(j=>j.match>=75).length} high matches · Click Re-scan to find new jobs`;
+    }
+  }
+});
+
+function getCompanyEmoji(company) {
+  const map = {
+    'Spotify': '🎵', 'Airbnb': '🏠', 'Stripe': '💳', 'Notion': '📝',
+    'Gusto': '💼', 'Checkr': '✅', 'Robinhood': '📈', 'Netflix': '🎬',
+    'Shopify': '🛍', 'Discord': '💬', 'Canva': '🎨', 'Linear': '📐',
+    'Vercel': '▲', 'Anthropic': '🤖', 'Openai': '🧠', 'Figma': '🎯',
+    'Coinbase': '₿', 'Datadog': '🐕', 'Brex': '💳', 'Plaid': '🏦'
+  };
+  return map[company] || '🏢';
+}
+
+function getCompanyColor(idx) {
+  const colors = ['#4f46e5','#059669','#f59e0b','#dc2626','#7c3aed','#0891b2','#be185d','#16a34a'];
+  return colors[idx % colors.length];
+}
+
+function timeAgo(dateStr) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const hrs = Math.floor(diff / 3600000);
+  const days = Math.floor(hrs / 24);
+  if (hrs < 1) return 'Just now';
+  if (hrs < 24) return `${hrs} hrs ago`;
+  return `${days} day${days > 1 ? 's' : ''} ago`;
 }
 
 function updateStats() {
@@ -642,12 +713,23 @@ function searchJobs(q) {
   ));
 }
 
-function applyToJob(id) {
+async function applyToJob(id) {
+  const job = allJobs.find(j => j.id === id);
+  if (!job) return;
   appliedIds.add(id);
   const card = document.getElementById('card-'+id);
   if (card) card.classList.add('applied');
   updateStats();
-  document.getElementById('s-applied').textContent = appliedIds.size;
+  // Update status in database
+  try {
+    await fetch(`${API_BASE}/api/jobs/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'applied' })
+    });
+    // Open real job URL
+    if (job.url) window.open(job.url, '_blank');
+  } catch(e) { console.log('Status update failed:', e); }
 }
 
 function skipJob(id) {
@@ -714,7 +796,8 @@ function resetScan() {
   document.getElementById('scan-banner').className = 'scan-banner idle animate-in';
   document.getElementById('scan-icon').textContent = '🌐';
   document.getElementById('scan-title').textContent = 'Ready to scan 10 job boards';
-  document.getElementById('scan-sub').textContent = 'Searching for Data Scientist, Data Analyst, Full Stack Developer, ML Engineer · Remote + USA · Last 48 hrs';
+  const roleText = userProfile.roles.length > 0 ? userProfile.roles.join(", ") : "Software Engineer, Data Scientist";
+  document.getElementById('scan-sub').textContent = `Searching for ${roleText} · Remote + USA · Last 48 hrs`;
   document.querySelectorAll('.board-chip').forEach(c => { c.className = 'board-chip'; });
   document.getElementById('scan-progress').style.display = 'none';
   document.getElementById('scan-fill').style.width = '0%';
