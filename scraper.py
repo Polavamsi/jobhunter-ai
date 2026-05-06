@@ -1,393 +1,265 @@
 """
-Job Scraper — Playwright-based scraper for all 10 job boards
-Searches for recently posted jobs matching the user's target roles
+scraper.py — Real job scraper using Greenhouse and Lever public APIs
+No bot detection, no Playwright needed for finding jobs.
 """
 
-from playwright.async_api import async_playwright
-from typing import List, Dict
+import httpx
 import asyncio
 import hashlib
-import re
-from datetime import datetime
+from typing import List, Dict
+from datetime import datetime, timezone
 
 
-BOARDS = [
-    "linkedin",
-    "indeed",
-    "glassdoor",
-    "ziprecruiter",
-    "dice",
-    "monster",
-    "angellist",
-    "naukri",
-    "careerbuilder",
-    "simplyhired",
+# ─── COMPANY LISTS ───────────────────────────────────────────────────────────
+
+# Companies using Greenhouse ATS
+GREENHOUSE_COMPANIES = [
+    "airbnb", "stripe", "notion", "figma", "dropbox", "coinbase",
+    "robinhood", "brex", "plaid", "retool", "airtable", "lattice",
+    "scale-ai", "anthropic", "openai", "datadog", "hashicorp",
+    "mongodb", "elastic", "confluent", "dbt-labs", "hex",
+    "benchling", "carta", "gusto", "rippling", "deel", "remote",
+    "checkr", "gem", "greenhouse", "lever", "workday", "zendesk",
+    "twilio", "sendgrid", "segment", "amplitude", "mixpanel",
+    "looker", "periscope", "mode", "sigma", "preset", "metabase",
+    "hightouch", "census", "fivetran", "airbyte", "dagster",
+    "prefect", "astronomer", "great-expectations", "monte-carlo"
 ]
 
+# Companies using Lever ATS
+LEVER_COMPANIES = [
+    "netflix", "shopify", "reddit", "spotify", "discord", "canva",
+    "figma", "linear", "vercel", "supabase", "planetscale", "railway",
+    "fly", "render", "cloudflare", "fastly", "netlify", "heroku",
+    "twitch", "roblox", "unity", "epic-games", "riot-games",
+    "duolingo", "coursera", "udemy", "masterclass", "kahoot",
+    "hubspot", "intercom", "drift", "calendly", "loom", "miro",
+    "asana", "monday", "clickup", "notion", "coda", "quip",
+    "salesforce", "servicenow", "workday", "oracle", "sap"
+]
 
-async def scrape_all_boards(roles: List[str], location: str, days_back: int = 2) -> List[Dict]:
-    """Scrape all job boards and return combined, deduplicated job list"""
-    all_jobs = []
-
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"]
-        )
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        )
-
-        for role in roles:
-            tasks = [
-                scrape_linkedin(context, role, location, days_back),
-                scrape_indeed(context, role, location, days_back),
-                scrape_glassdoor(context, role, location, days_back),
-                scrape_ziprecruiter(context, role, location, days_back),
-                scrape_dice(context, role, location, days_back),
-                scrape_monster(context, role, location, days_back),
-                scrape_angellist(context, role, location, days_back),
-                scrape_simplyhired(context, role, location, days_back),
-            ]
-
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for r in results:
-                if isinstance(r, list):
-                    all_jobs.extend(r)
-
-        await browser.close()
-
-    # Deduplicate by title+company
-    seen = set()
-    unique = []
-    for j in all_jobs:
-        key = f"{j['title'].lower()}_{j['company'].lower()}"
-        if key not in seen:
-            seen.add(key)
-            unique.append(j)
-
-    return unique
+# Keywords to match against user's target roles
+ROLE_KEYWORDS = {
+    "data scientist": ["data scientist", "data science", "ml scientist", "research scientist"],
+    "data analyst": ["data analyst", "analytics engineer", "business analyst", "bi analyst"],
+    "software engineer": ["software engineer", "software developer", "swe", "backend engineer", "frontend engineer", "full stack", "fullstack"],
+    "ml engineer": ["machine learning engineer", "ml engineer", "mlops", "ai engineer"],
+    "data engineer": ["data engineer", "etl engineer", "analytics engineer", "pipeline engineer"],
+    "full stack developer": ["full stack", "fullstack", "full-stack", "web developer"],
+}
 
 
 def make_id(title: str, company: str, board: str) -> str:
-    return hashlib.md5(f"{title}{company}{board}".encode()).hexdigest()
+    return hashlib.md5(f"{title.lower()}{company.lower()}{board}".encode()).hexdigest()
 
 
-# ─── LINKEDIN ───────────────────────────────────────────────────────────────
+def matches_roles(job_title: str, target_roles: List[str]) -> bool:
+    """Check if job title matches any of the user's target roles"""
+    title_lower = job_title.lower()
+    for role in target_roles:
+        role_lower = role.lower()
+        keywords = ROLE_KEYWORDS.get(role_lower, [role_lower])
+        if any(kw in title_lower for kw in keywords):
+            return True
+    return False
 
-async def scrape_linkedin(ctx, role: str, location: str, days_back: int) -> List[Dict]:
+
+def is_full_time(job: Dict) -> bool:
+    """Check if job is full-time"""
+    # Check employment type fields
+    employment = str(job.get("employment_type", "")).lower()
+    title = str(job.get("title", "")).lower()
+    
+    # Skip obvious non-full-time
+    skip_words = ["intern", "internship", "contract", "contractor", "part-time", 
+                  "part time", "temporary", "temp ", "freelance", "c2c", "corp-to-corp"]
+    
+    for word in skip_words:
+        if word in title or word in employment:
+            return False
+    return True
+
+
+# ─── GREENHOUSE API ───────────────────────────────────────────────────────────
+
+async def scrape_greenhouse(
+    client: httpx.AsyncClient,
+    company: str,
+    target_roles: List[str],
+    location_filter: str = "remote"
+) -> List[Dict]:
+    """Fetch jobs from Greenhouse public API"""
     jobs = []
     try:
-        page = await ctx.new_page()
-        loc = "Remote" if "remote" in location.lower() else location
-        url = f"https://www.linkedin.com/jobs/search/?keywords={role.replace(' ', '%20')}&location={loc}&f_TPR=r{days_back * 86400}&f_E=1,2"
-        await page.goto(url, timeout=20000)
-        await page.wait_for_selector(".job-search-card", timeout=8000)
-
-        cards = await page.query_selector_all(".job-search-card")
-        for card in cards[:15]:
-            try:
-                title = await card.query_selector(".base-search-card__title")
-                company = await card.query_selector(".base-search-card__subtitle")
-                loc_el = await card.query_selector(".job-search-card__location")
-                link = await card.query_selector("a.base-card__full-link")
-
-                t = (await title.inner_text()).strip() if title else ""
-                c = (await company.inner_text()).strip() if company else ""
-                l = (await loc_el.inner_text()).strip() if loc_el else ""
-                href = await link.get_attribute("href") if link else ""
-
-                if t and c:
-                    jobs.append({
-                        "external_id": make_id(t, c, "linkedin"),
-                        "title": t, "company": c, "location": l,
-                        "board": "LinkedIn", "url": href,
-                        "salary": "", "description": "", "skills": [],
-                        "posted": "Recent"
-                    })
-            except Exception:
+        url = f"https://boards-api.greenhouse.io/v1/boards/{company}/jobs"
+        response = await client.get(url, timeout=10)
+        
+        if response.status_code != 200:
+            return []
+        
+        data = response.json()
+        all_jobs = data.get("jobs", [])
+        
+        for job in all_jobs:
+            title = job.get("title", "")
+            location = job.get("location", {}).get("name", "")
+            
+            # Filter by role match
+            if not matches_roles(title, target_roles):
                 continue
-
-        await page.close()
+            
+            # Filter by location (remote or US)
+            location_lower = location.lower()
+            is_remote = "remote" in location_lower
+            is_us = any(state in location_lower for state in [
+                "new york", "san francisco", "seattle", "austin", "boston",
+                "chicago", "los angeles", "denver", "atlanta", ", ny", ", ca",
+                ", tx", ", wa", ", ma", ", il", "united states", "usa", "us"
+            ])
+            
+            if location_filter == "remote" and not (is_remote or is_us):
+                continue
+            
+            # Filter full-time
+            if not is_full_time({"title": title}):
+                continue
+            
+            jobs.append({
+                "external_id": make_id(title, company, "greenhouse"),
+                "title": title,
+                "company": company.replace("-", " ").title(),
+                "location": location or "Remote",
+                "salary": "",
+                "description": job.get("content", "")[:500] if job.get("content") else "",
+                "skills": [],
+                "board": "Greenhouse",
+                "url": job.get("absolute_url", ""),
+                "posted": job.get("updated_at", ""),
+                "is_easy_apply": False,
+                "ats": "greenhouse"
+            })
+    
     except Exception as e:
-        print(f"LinkedIn scrape error: {e}")
+        print(f"Greenhouse error for {company}: {e}")
+    
     return jobs
 
 
-# ─── INDEED ─────────────────────────────────────────────────────────────────
+# ─── LEVER API ────────────────────────────────────────────────────────────────
 
-async def scrape_indeed(ctx, role: str, location: str, days_back: int) -> List[Dict]:
+async def scrape_lever(
+    client: httpx.AsyncClient,
+    company: str,
+    target_roles: List[str],
+    location_filter: str = "remote"
+) -> List[Dict]:
+    """Fetch jobs from Lever public API"""
     jobs = []
     try:
-        page = await ctx.new_page()
-        loc = "remote" if "remote" in location.lower() else location.replace(" ", "+")
-        url = f"https://www.indeed.com/jobs?q={role.replace(' ', '+')}&l={loc}&fromage={days_back}"
-        await page.goto(url, timeout=20000)
-        await page.wait_for_selector(".job_seen_beacon", timeout=8000)
-
-        cards = await page.query_selector_all(".job_seen_beacon")
-        for card in cards[:15]:
-            try:
-                title = await card.query_selector("h2.jobTitle span")
-                company = await card.query_selector("[data-testid='company-name']")
-                loc_el = await card.query_selector("[data-testid='text-location']")
-                salary_el = await card.query_selector(".salary-snippet-container")
-                link = await card.query_selector("a.jcs-JobTitle")
-
-                t = (await title.inner_text()).strip() if title else ""
-                c = (await company.inner_text()).strip() if company else ""
-                l = (await loc_el.inner_text()).strip() if loc_el else ""
-                s = (await salary_el.inner_text()).strip() if salary_el else ""
-                href = "https://indeed.com" + (await link.get_attribute("href") if link else "")
-
-                if t and c:
-                    jobs.append({
-                        "external_id": make_id(t, c, "indeed"),
-                        "title": t, "company": c, "location": l, "salary": s,
-                        "board": "Indeed", "url": href,
-                        "description": "", "skills": [], "posted": "Recent"
-                    })
-            except Exception:
+        url = f"https://api.lever.co/v0/postings/{company}"
+        response = await client.get(url, timeout=10)
+        
+        if response.status_code != 200:
+            return []
+        
+        all_jobs = response.json()
+        
+        for job in all_jobs:
+            title = job.get("text", "")
+            categories = job.get("categories", {})
+            location = categories.get("location", "")
+            commitment = categories.get("commitment", "")
+            
+            # Filter by role match
+            if not matches_roles(title, target_roles):
                 continue
+            
+            # Filter full-time
+            if commitment and any(word in commitment.lower() for word in 
+                                  ["intern", "contract", "part-time", "part time"]):
+                continue
+            
+            # Filter by location
+            location_lower = location.lower()
+            is_remote = "remote" in location_lower
+            is_us = any(state in location_lower for state in [
+                "new york", "san francisco", "seattle", "austin", "boston",
+                "chicago", "los angeles", "denver", "united states", "usa"
+            ])
+            
+            if location_filter == "remote" and not (is_remote or is_us):
+                continue
+            
+            # Build description from job lists
+            description = ""
+            lists = job.get("lists", [])
+            for lst in lists[:2]:
+                description += lst.get("text", "") + " "
+            description = description[:500]
 
-        await page.close()
+            jobs.append({
+                "external_id": make_id(title, company, "lever"),
+                "title": title,
+                "company": company.replace("-", " ").title(),
+                "location": location or "Remote",
+                "salary": "",
+                "description": description,
+                "skills": [],
+                "board": "Lever",
+                "url": job.get("hostedUrl", ""),
+                "posted": str(job.get("createdAt", "")),
+                "is_easy_apply": False,
+                "ats": "lever"
+            })
+    
     except Exception as e:
-        print(f"Indeed scrape error: {e}")
+        print(f"Lever error for {company}: {e}")
+    
     return jobs
 
 
-# ─── GLASSDOOR ──────────────────────────────────────────────────────────────
+# ─── MAIN SCRAPER ─────────────────────────────────────────────────────────────
 
-async def scrape_glassdoor(ctx, role: str, location: str, days_back: int) -> List[Dict]:
-    jobs = []
-    try:
-        page = await ctx.new_page()
-        url = f"https://www.glassdoor.com/Job/jobs.htm?sc.keyword={role.replace(' ', '+')}&locT=C&locId=1&fromAge={days_back}"
-        await page.goto(url, timeout=20000)
-        await page.wait_for_selector("[data-test='jobListing']", timeout=8000)
+async def scrape_all_boards(
+    roles: List[str],
+    location: str = "Remote + USA",
+    days_back: int = 2
+) -> List[Dict]:
+    """
+    Main entry point — scrapes Greenhouse and Lever for all companies.
+    Returns deduplicated list of matching jobs.
+    """
+    all_jobs = []
+    location_filter = "remote"  # Default to remote + US
 
-        cards = await page.query_selector_all("[data-test='jobListing']")
-        for card in cards[:12]:
-            try:
-                title = await card.query_selector("[data-test='job-title']")
-                company = await card.query_selector("[data-test='employer-name']")
-                loc_el = await card.query_selector("[data-test='emp-location']")
-                salary_el = await card.query_selector("[data-test='detailSalary']")
+    async with httpx.AsyncClient() as client:
+        # Run Greenhouse scrapes concurrently
+        greenhouse_tasks = [
+            scrape_greenhouse(client, company, roles, location_filter)
+            for company in GREENHOUSE_COMPANIES
+        ]
+        greenhouse_results = await asyncio.gather(*greenhouse_tasks, return_exceptions=True)
+        for result in greenhouse_results:
+            if isinstance(result, list):
+                all_jobs.extend(result)
 
-                t = (await title.inner_text()).strip() if title else ""
-                c = (await company.inner_text()).strip() if company else ""
-                l = (await loc_el.inner_text()).strip() if loc_el else ""
-                s = (await salary_el.inner_text()).strip() if salary_el else ""
+        # Run Lever scrapes concurrently
+        lever_tasks = [
+            scrape_lever(client, company, roles, location_filter)
+            for company in LEVER_COMPANIES
+        ]
+        lever_results = await asyncio.gather(*lever_tasks, return_exceptions=True)
+        for result in lever_results:
+            if isinstance(result, list):
+                all_jobs.extend(result)
 
-                if t and c:
-                    jobs.append({
-                        "external_id": make_id(t, c, "glassdoor"),
-                        "title": t, "company": c, "location": l, "salary": s,
-                        "board": "Glassdoor", "url": "",
-                        "description": "", "skills": [], "posted": "Recent"
-                    })
-            except Exception:
-                continue
+    # Deduplicate by external_id
+    seen = set()
+    unique_jobs = []
+    for job in all_jobs:
+        if job["external_id"] not in seen:
+            seen.add(job["external_id"])
+            unique_jobs.append(job)
 
-        await page.close()
-    except Exception as e:
-        print(f"Glassdoor scrape error: {e}")
-    return jobs
-
-
-# ─── ZIPRECRUITER ────────────────────────────────────────────────────────────
-
-async def scrape_ziprecruiter(ctx, role: str, location: str, days_back: int) -> List[Dict]:
-    jobs = []
-    try:
-        page = await ctx.new_page()
-        url = f"https://www.ziprecruiter.com/Jobs/{role.replace(' ', '-')}?days={days_back}"
-        await page.goto(url, timeout=20000)
-        await page.wait_for_selector(".job_content", timeout=8000)
-
-        cards = await page.query_selector_all(".job_content")
-        for card in cards[:12]:
-            try:
-                title = await card.query_selector(".job_title")
-                company = await card.query_selector(".hiring_company_text")
-                loc_el = await card.query_selector(".location")
-                salary_el = await card.query_selector(".salary")
-                link = await card.query_selector("a.job_link")
-
-                t = (await title.inner_text()).strip() if title else ""
-                c = (await company.inner_text()).strip() if company else ""
-                l = (await loc_el.inner_text()).strip() if loc_el else ""
-                s = (await salary_el.inner_text()).strip() if salary_el else ""
-                href = await link.get_attribute("href") if link else ""
-
-                if t and c:
-                    jobs.append({
-                        "external_id": make_id(t, c, "ziprecruiter"),
-                        "title": t, "company": c, "location": l, "salary": s,
-                        "board": "ZipRecruiter", "url": href,
-                        "description": "", "skills": [], "posted": "Recent"
-                    })
-            except Exception:
-                continue
-
-        await page.close()
-    except Exception as e:
-        print(f"ZipRecruiter scrape error: {e}")
-    return jobs
-
-
-# ─── DICE ───────────────────────────────────────────────────────────────────
-
-async def scrape_dice(ctx, role: str, location: str, days_back: int) -> List[Dict]:
-    jobs = []
-    try:
-        page = await ctx.new_page()
-        url = f"https://www.dice.com/jobs?q={role.replace(' ', '+')}&location=Remote&datePosted={days_back}d"
-        await page.goto(url, timeout=20000)
-        await page.wait_for_selector("dhi-search-card", timeout=8000)
-
-        cards = await page.query_selector_all("dhi-search-card")
-        for card in cards[:12]:
-            try:
-                title = await card.query_selector("a.card-title-link")
-                company = await card.query_selector(".card-company")
-                loc_el = await card.query_selector(".search-result-location")
-
-                t = (await title.inner_text()).strip() if title else ""
-                c = (await company.inner_text()).strip() if company else ""
-                l = (await loc_el.inner_text()).strip() if loc_el else ""
-                href = await title.get_attribute("href") if title else ""
-
-                if t and c:
-                    jobs.append({
-                        "external_id": make_id(t, c, "dice"),
-                        "title": t, "company": c, "location": l, "salary": "",
-                        "board": "Dice", "url": href,
-                        "description": "", "skills": [], "posted": "Recent"
-                    })
-            except Exception:
-                continue
-
-        await page.close()
-    except Exception as e:
-        print(f"Dice scrape error: {e}")
-    return jobs
-
-
-# ─── MONSTER ────────────────────────────────────────────────────────────────
-
-async def scrape_monster(ctx, role: str, location: str, days_back: int) -> List[Dict]:
-    jobs = []
-    try:
-        page = await ctx.new_page()
-        url = f"https://www.monster.com/jobs/search?q={role.replace(' ', '+')}&where=Remote&tm={days_back}"
-        await page.goto(url, timeout=20000)
-        await page.wait_for_selector(".job-cardstyle__JobCardComponent", timeout=8000)
-
-        cards = await page.query_selector_all(".job-cardstyle__JobCardComponent")
-        for card in cards[:12]:
-            try:
-                title = await card.query_selector("h3.job-cardstyle__JobTitle")
-                company = await card.query_selector(".job-cardstyle__CompanyName")
-                loc_el = await card.query_selector(".job-cardstyle__Location")
-                link = await card.query_selector("a")
-
-                t = (await title.inner_text()).strip() if title else ""
-                c = (await company.inner_text()).strip() if company else ""
-                l = (await loc_el.inner_text()).strip() if loc_el else ""
-                href = await link.get_attribute("href") if link else ""
-
-                if t and c:
-                    jobs.append({
-                        "external_id": make_id(t, c, "monster"),
-                        "title": t, "company": c, "location": l, "salary": "",
-                        "board": "Monster", "url": href,
-                        "description": "", "skills": [], "posted": "Recent"
-                    })
-            except Exception:
-                continue
-
-        await page.close()
-    except Exception as e:
-        print(f"Monster scrape error: {e}")
-    return jobs
-
-
-# ─── ANGELLIST / WELLFOUND ──────────────────────────────────────────────────
-
-async def scrape_angellist(ctx, role: str, location: str, days_back: int) -> List[Dict]:
-    jobs = []
-    try:
-        page = await ctx.new_page()
-        url = f"https://wellfound.com/jobs?q={role.replace(' ', '+')}&remote=true"
-        await page.goto(url, timeout=20000)
-        await page.wait_for_selector("[data-test='StartupResult']", timeout=8000)
-
-        cards = await page.query_selector_all("[data-test='JobListing']")
-        for card in cards[:12]:
-            try:
-                title = await card.query_selector("a[data-test='job-title']")
-                company = await card.query_selector("[data-test='company-name']")
-                loc_el = await card.query_selector("[data-test='location']")
-                salary_el = await card.query_selector("[data-test='salary']")
-
-                t = (await title.inner_text()).strip() if title else ""
-                c = (await company.inner_text()).strip() if company else ""
-                l = (await loc_el.inner_text()).strip() if loc_el else "Remote"
-                s = (await salary_el.inner_text()).strip() if salary_el else ""
-                href = "https://wellfound.com" + (await title.get_attribute("href") if title else "")
-
-                if t and c:
-                    jobs.append({
-                        "external_id": make_id(t, c, "angellist"),
-                        "title": t, "company": c, "location": l, "salary": s,
-                        "board": "AngelList", "url": href,
-                        "description": "", "skills": [], "posted": "Recent"
-                    })
-            except Exception:
-                continue
-
-        await page.close()
-    except Exception as e:
-        print(f"AngelList scrape error: {e}")
-    return jobs
-
-
-# ─── SIMPLYHIRED ─────────────────────────────────────────────────────────────
-
-async def scrape_simplyhired(ctx, role: str, location: str, days_back: int) -> List[Dict]:
-    jobs = []
-    try:
-        page = await ctx.new_page()
-        url = f"https://www.simplyhired.com/search?q={role.replace(' ', '+')}&l=remote&date={days_back}d"
-        await page.goto(url, timeout=20000)
-        await page.wait_for_selector("[data-testid='searchSerpJob']", timeout=8000)
-
-        cards = await page.query_selector_all("[data-testid='searchSerpJob']")
-        for card in cards[:12]:
-            try:
-                title = await card.query_selector("h3 a")
-                company = await card.query_selector(".css-1h7lukg")
-                loc_el = await card.query_selector(".css-1t92pv")
-                salary_el = await card.query_selector(".css-1udmfvc")
-
-                t = (await title.inner_text()).strip() if title else ""
-                c = (await company.inner_text()).strip() if company else ""
-                l = (await loc_el.inner_text()).strip() if loc_el else ""
-                s = (await salary_el.inner_text()).strip() if salary_el else ""
-                href = "https://simplyhired.com" + (await title.get_attribute("href") if title else "")
-
-                if t and c:
-                    jobs.append({
-                        "external_id": make_id(t, c, "simplyhired"),
-                        "title": t, "company": c, "location": l, "salary": s,
-                        "board": "SimplyHired", "url": href,
-                        "description": "", "skills": [], "posted": "Recent"
-                    })
-            except Exception:
-                continue
-
-        await page.close()
-    except Exception as e:
-        print(f"SimplyHired scrape error: {e}")
-    return jobs
+    print(f"✅ Scraped {len(unique_jobs)} unique jobs matching {roles}")
+    return unique_jobs

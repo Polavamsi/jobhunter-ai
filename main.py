@@ -13,6 +13,8 @@ from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 from database import db
+from scraper import scrape_all_boards
+import httpx
 
 load_dotenv()
 
@@ -21,7 +23,7 @@ app = FastAPI(title="JobHunter AI API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -191,14 +193,153 @@ async def get_scan_status(user_id: str):
 async def run_scan_for_user(user_id: str):
     try:
         await db.update_scan_status(user_id, "scanning")
+
+        # Get user profile and preferences
         resume = await db.get_resume(user_id)
         prefs = await db.get_preferences(user_id)
-        if not resume or not prefs:
+
+        if not resume:
+            print(f"No resume found for user {user_id}")
+            await db.update_scan_status(user_id, "idle", jobs_found=0)
             return
-        await db.update_scan_status(user_id, "idle", jobs_found=0)
+
+        profile = resume.get("profile", {})
+        
+        # Get target roles from profile or preferences
+        target_roles = []
+        if prefs:
+            target_roles = prefs.get("roles", [])
+        if not target_roles:
+            target_roles = profile.get("jobPreferences", {}).get("targetRoles", [])
+        if not target_roles:
+            target_roles = ["Software Engineer", "Data Scientist", "Data Analyst"]
+
+        location = "Remote + USA"
+        if prefs:
+            location = prefs.get("location", "Remote + USA")
+
+        # 1. Scrape real jobs from Greenhouse + Lever
+        print(f"🔍 Scanning for: {target_roles}")
+        raw_jobs = await scrape_all_boards(
+            roles=target_roles,
+            location=location,
+            days_back=2
+        )
+
+        if not raw_jobs:
+            print("No jobs found in this scan")
+            await db.update_scan_status(user_id, "idle", jobs_found=0)
+            return
+
+        # 2. Filter already-seen jobs
+        existing_ids = await db.get_seen_job_ids(user_id)
+        new_jobs = [j for j in raw_jobs if j["external_id"] not in existing_ids]
+        print(f"📋 {len(new_jobs)} new jobs (filtered {len(raw_jobs) - len(new_jobs)} already seen)")
+
+        if not new_jobs:
+            await db.update_scan_status(user_id, "idle", jobs_found=0)
+            return
+
+        # 3. AI match scoring
+        scored_jobs = await match_jobs_to_profile(claude, new_jobs, profile)
+
+        # 4. Save to database
+        await db.save_jobs(user_id, scored_jobs)
+        await db.update_scan_status(user_id, "idle", jobs_found=len(new_jobs))
+
+        # 5. Log activity
+        await db.log_activity(
+            user_id, "scan",
+            f"✅ Scan complete — found {len(new_jobs)} new jobs across Greenhouse and Lever",
+            {"jobs_found": len(new_jobs), "roles": target_roles}
+        )
+
+        # 6. Auto-apply if enabled
+        if prefs and prefs.get("auto_apply_enabled"):
+            threshold = prefs.get("min_match_threshold", 75)
+            daily_limit = prefs.get("max_applies_per_day", 25)
+            todays_count = await db.get_todays_apply_count(user_id)
+            remaining = daily_limit - todays_count
+
+            high_matches = [
+                j for j in scored_jobs
+                if j.get("match", 0) >= threshold
+                and not j.get("is_easy_apply", False)
+            ][:remaining]
+
+            print(f"⚡ Auto-applying to {len(high_matches)} high-match jobs")
+            for job in high_matches:
+                try:
+                    from applier import auto_apply_to_job
+                    await auto_apply_to_job(user_id, job, claude, prefs or {})
+                except Exception as e:
+                    print(f"Apply error: {e}")
+
     except Exception as e:
         await db.update_scan_status(user_id, "error")
         print(f"Scan error for {user_id}: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+async def match_jobs_to_profile(claude_client, jobs, profile):
+    """Score jobs against user profile using Claude AI"""
+    if not jobs:
+        return []
+
+    skills = sum(profile.get("skills", {}).values(), [])
+    experience = profile.get("experience", [])
+
+    # Batch into groups of 10
+    batches = [jobs[i:i+10] for i in range(0, len(jobs), 10)]
+    scored = []
+
+    for batch in batches:
+        jobs_text = "\n\n".join([
+            f"Job {i+1} (id={j['external_id']}):\nTitle: {j['title']}\nCompany: {j['company']}\nDescription: {j.get('description','')[:200]}"
+            for i, j in enumerate(batch)
+        ])
+
+        try:
+            response = claude_client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1000,
+                messages=[{
+                    "role": "user",
+                    "content": f"""Score these jobs against this candidate. Return ONLY a JSON array, no markdown.
+
+Candidate:
+- Title: {profile.get('title')}
+- Skills: {', '.join(skills[:15])}
+- Experience: {len(experience)} roles
+
+Jobs:
+{jobs_text}
+
+Return: [{{"external_id":"...","match":85,"reason":"One sentence reason"}}]
+Score 0-100. Be realistic."""
+                }]
+            )
+
+            import json
+            raw = response.content[0].text.replace("```json", "").replace("```", "").strip()
+            scores = json.loads(raw)
+            score_map = {s["external_id"]: s for s in scores}
+
+            for j in batch:
+                score_data = score_map.get(j["external_id"], {})
+                scored.append({
+                    **j,
+                    "match": score_data.get("match", 50),
+                    "reason": score_data.get("reason", ""),
+                })
+
+        except Exception as e:
+            print(f"Matching error: {e}")
+            for j in batch:
+                scored.append({**j, "match": 50, "reason": "AI scoring unavailable"})
+
+    return sorted(scored, key=lambda x: x["match"], reverse=True)
 
 async def run_scheduled_scan():
     users = await db.get_all_active_users()
