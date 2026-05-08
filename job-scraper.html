@@ -659,7 +659,7 @@ function renderJobs(jobs) {
     const cardClass = j.match >= 80 ? 'high-match' : j.match >= 65 ? 'med-match' : '';
     const isApplied = appliedIds.has(j.id);
     return `
-    <div class="job-card ${cardClass} ${isApplied?'applied':''}" id="card-${j.id}" onclick="openModal(${j.id})">
+    <div class="job-card ${cardClass} ${isApplied?'applied':''}" id="card-${j.id}" onclick="openModal('${j.id}')">
       <div class="applied-overlay">✅ Applied!</div>
       <div class="job-card-top">
         <div class="company-logo" style="background:${j.color}22;color:${j.color}">${j.logo}</div>
@@ -685,9 +685,9 @@ function renderJobs(jobs) {
         <span class="posted-time">🕐 ${j.posted}</span>
       </div>
       <div class="card-actions" onclick="event.stopPropagation()">
-        <button class="action-sm action-apply" onclick="applyToJob(${j.id})">⚡ Apply</button>
-        <button class="action-sm action-skip" onclick="skipJob(${j.id})">✕ Skip</button>
-        <button class="action-sm action-view" onclick="openModal(${j.id})">View Details →</button>
+        <button class="action-sm action-apply" onclick="applyToJob('${j.id}')">⚡ Apply</button>
+        <button class="action-sm action-skip" onclick="skipJob('${j.id}')">✕ Skip</button>
+        <button class="action-sm action-view" onclick="openModal('${j.id}')">View Details →</button>
       </div>
     </div>`;
   }).join('');
