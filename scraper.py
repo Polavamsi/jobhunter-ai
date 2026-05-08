@@ -141,13 +141,32 @@ async def scrape_greenhouse(
             if not is_appropriate_level(title, experience_level):
                 continue
             
+            # Fetch full job description from detail endpoint
+            full_desc = ""
+            salary = ""
+            job_id = job.get("id", "")
+            try:
+                detail_url = f"https://boards-api.greenhouse.io/v1/boards/{company}/jobs/{job_id}"
+                detail_res = await client.get(detail_url, timeout=10)
+                if detail_res.status_code == 200:
+                    detail = detail_res.json()
+                    raw = detail.get("content", "")
+                    full_desc = re.sub("<[^>]+>", " ", raw)
+                    full_desc = re.sub(r"&[a-zA-Z]+;", " ", full_desc)
+                    full_desc = " ".join(full_desc.split())[:3000]
+                    salary_match = re.search(r"\$[\d,]+\s*[-–]\s*\$[\d,]+", full_desc)
+                    if salary_match:
+                        salary = salary_match.group(0)
+            except Exception as de:
+                print(f"Could not fetch details for {title}: {de}")
+
             jobs.append({
                 "external_id": make_id(title, company, "greenhouse"),
                 "title": title,
                 "company": company.replace("-", " ").title(),
                 "location": location or "Remote",
-                "salary": "",
-                "description": job.get("content", "")[:500] if job.get("content") else "",
+                "salary": salary,
+                "description": full_desc,
                 "skills": [],
                 "board": "Greenhouse",
                 "url": job.get("absolute_url", ""),
