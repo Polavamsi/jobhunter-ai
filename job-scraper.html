@@ -713,23 +713,121 @@ function searchJobs(q) {
   ));
 }
 
+let currentApplyJob = null;
+let applyPanelVisible = false;
+
 async function applyToJob(id) {
   const job = allJobs.find(j => j.id === id);
   if (!job) return;
-  appliedIds.add(id);
-  const card = document.getElementById('card-'+id);
+  currentApplyJob = job;
+  await showApplyPanel(job);
+}
+
+async function showApplyPanel(job) {
+  let profile = {};
+  try {
+    const res = await fetch(`${API_BASE}/api/resume/${USER_ID}`);
+    if (res.ok) {
+      const data = await res.json();
+      profile = data.profile || {};
+    }
+  } catch(e) {}
+
+  document.getElementById('ap-title').textContent = job.title;
+  document.getElementById('ap-company').textContent = job.company + ' - ' + job.location;
+  document.getElementById('ap-name').value = profile.name || USER_NAME || '';
+  document.getElementById('ap-email').value = profile.email || '';
+  document.getElementById('ap-phone').value = profile.phone || '';
+  document.getElementById('ap-location').value = profile.location || '';
+  document.getElementById('ap-linkedin').value = profile.linkedin || '';
+  document.getElementById('ap-github').value = profile.github || '';
+  document.getElementById('ap-cover').value = '';
+  document.getElementById('ap-gen-btn').textContent = 'Generate with AI';
+  document.getElementById('ap-gen-btn').disabled = false;
+
+  document.getElementById('apply-panel').style.display = 'block';
+  document.getElementById('apply-tab').style.display = 'block';
+  applyPanelVisible = true;
+}
+
+function toggleApplyPanel() {
+  const panel = document.getElementById('apply-panel');
+  if (applyPanelVisible) {
+    panel.style.display = 'none';
+    applyPanelVisible = false;
+  } else {
+    panel.style.display = 'block';
+    applyPanelVisible = true;
+  }
+}
+
+function cancelApply() {
+  document.getElementById('apply-panel').style.display = 'none';
+  document.getElementById('apply-tab').style.display = 'none';
+  applyPanelVisible = false;
+  currentApplyJob = null;
+}
+
+function copyField(fieldId) {
+  const el = document.getElementById(fieldId);
+  const text = el.value || el.textContent || '';
+  if (!text.trim()) { alert('Nothing to copy - field is empty.'); return; }
+  navigator.clipboard.writeText(text).then(() => {
+    const row = el.parentElement;
+    const btn = row ? row.querySelector('.ap-copy') : null;
+    if (btn) {
+      const orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = orig, 1500);
+    }
+  });
+}
+
+async function generateCoverLetter() {
+  if (!currentApplyJob) return;
+  const btn = document.getElementById('ap-gen-btn');
+  btn.textContent = 'Generating...';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/cover-letter/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: USER_ID,
+        job_title: currentApplyJob.title,
+        company: currentApplyJob.company,
+        job_description: currentApplyJob.desc || currentApplyJob.description || ''
+      })
+    });
+    const data = await res.json();
+    document.getElementById('ap-cover').value = data.cover_letter || 'Could not generate. Please write manually.';
+  } catch(e) {
+    document.getElementById('ap-cover').value = 'Could not generate. Please write manually.';
+  }
+
+  btn.textContent = 'Regenerate';
+  btn.disabled = false;
+}
+
+async function openJobAndMark() {
+  if (!currentApplyJob) return;
+  if (currentApplyJob.url) window.open(currentApplyJob.url, '_blank');
+
+  appliedIds.add(currentApplyJob.id);
+  const card = document.getElementById('card-' + currentApplyJob.id);
   if (card) card.classList.add('applied');
   updateStats();
-  // Update status in database
+
   try {
-    await fetch(`${API_BASE}/api/jobs/${id}/status`, {
+    await fetch(`${API_BASE}/api/jobs/${currentApplyJob.id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'applied' })
     });
-    // Open real job URL
-    if (job.url) window.open(job.url, '_blank');
-  } catch(e) { console.log('Status update failed:', e); }
+  } catch(e) {}
+
+  cancelApply();
 }
 
 function skipJob(id) {
@@ -811,5 +909,79 @@ function resetScan() {
 
 function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 </script>
+
+<!-- PERSISTENT APPLY TAB (always visible when panel active) -->
+<div id="apply-tab" style="display:none;position:fixed;right:0;top:50%;transform:translateY(-50%);z-index:1001;background:var(--accent);color:#fff;writing-mode:vertical-rl;text-orientation:mixed;padding:12px 8px;border-radius:8px 0 0 8px;cursor:pointer;font-size:12px;font-weight:600;font-family:var(--font-body);letter-spacing:0.5px;box-shadow:-2px 0 12px rgba(0,0,0,0.3)" onclick="toggleApplyPanel()">
+  Apply Info
+</div>
+
+<!-- ONE-CLICK APPLY PANEL -->
+<div id="apply-panel" style="display:none;position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:2px solid var(--accent);z-index:1000;padding:20px 24px;box-shadow:0 -8px 32px rgba(0,0,0,0.5);max-height:65vh;overflow-y:auto;">
+  <div style="max-width:800px;margin:0 auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div>
+        <div style="font-family:var(--font-head);font-size:16px;font-weight:700;color:var(--accent2)" id="ap-title">Apply to Job</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px" id="ap-company"></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span style="font-size:11px;color:var(--muted)">Click tab on right to reopen</span>
+        <button onclick="toggleApplyPanel()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:var(--font-body)">Hide</button>
+        <button onclick="cancelApply()" style="background:none;border:1px solid rgba(248,113,113,0.3);color:var(--red);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-family:var(--font-body)">Cancel</button>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+      <div class="ap-field">
+        <div class="ap-label">Full Name</div>
+        <div class="ap-row"><input class="ap-input" id="ap-name" readonly/><button class="ap-copy" onclick="copyField('ap-name')">Copy</button></div>
+      </div>
+      <div class="ap-field">
+        <div class="ap-label">Email</div>
+        <div class="ap-row"><input class="ap-input" id="ap-email" readonly/><button class="ap-copy" onclick="copyField('ap-email')">Copy</button></div>
+      </div>
+      <div class="ap-field">
+        <div class="ap-label">Phone</div>
+        <div class="ap-row"><input class="ap-input" id="ap-phone" readonly/><button class="ap-copy" onclick="copyField('ap-phone')">Copy</button></div>
+      </div>
+      <div class="ap-field">
+        <div class="ap-label">Location</div>
+        <div class="ap-row"><input class="ap-input" id="ap-location" readonly/><button class="ap-copy" onclick="copyField('ap-location')">Copy</button></div>
+      </div>
+      <div class="ap-field">
+        <div class="ap-label">LinkedIn</div>
+        <div class="ap-row"><input class="ap-input" id="ap-linkedin" readonly/><button class="ap-copy" onclick="copyField('ap-linkedin')">Copy</button></div>
+      </div>
+      <div class="ap-field">
+        <div class="ap-label">GitHub</div>
+        <div class="ap-row"><input class="ap-input" id="ap-github" readonly/><button class="ap-copy" onclick="copyField('ap-github')">Copy</button></div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div class="ap-label">AI Cover Letter</div>
+        <div style="display:flex;gap:8px">
+          <button class="ap-copy" onclick="copyField('ap-cover')">Copy Letter</button>
+          <button class="ap-copy" id="ap-gen-btn" onclick="generateCoverLetter()" style="background:rgba(108,99,255,0.15);border-color:var(--accent)">Generate with AI</button>
+        </div>
+      </div>
+      <textarea class="ap-input" id="ap-cover" rows="5" style="width:100%;resize:vertical" placeholder="Click Generate to create a cover letter tailored to this specific job..."></textarea>
+    </div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end;padding-top:12px;border-top:1px solid var(--border)">
+      <button onclick="toggleApplyPanel()" style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:10px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-family:var(--font-body)">Hide Panel</button>
+      <button onclick="openJobAndMark()" style="background:var(--accent);border:none;color:#fff;padding:10px 20px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;font-family:var(--font-body)">Open Job and Mark Applied</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.ap-field { display:flex;flex-direction:column;gap:4px; }
+.ap-label { font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px; }
+.ap-row { display:flex;gap:6px; }
+.ap-input { background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:6px;font-size:13px;font-family:var(--font-body);flex:1;outline:none; }
+.ap-copy { background:rgba(108,99,255,0.1);border:1px solid rgba(108,99,255,0.3);color:var(--accent2);padding:6px 10px;border-radius:6px;cursor:pointer;font-size:12px;white-space:nowrap;font-family:var(--font-body); }
+.ap-copy:hover { background:rgba(108,99,255,0.2); }
+</style>
 </body>
 </html>
