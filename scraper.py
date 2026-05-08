@@ -151,9 +151,10 @@ async def scrape_greenhouse(
                 if detail_res.status_code == 200:
                     detail = detail_res.json()
                     raw = detail.get("content", "")
-                    full_desc = re.sub("<[^>]+>", " ", raw)
-                    full_desc = re.sub(r"&[a-zA-Z]+;", " ", full_desc)
-                    full_desc = " ".join(full_desc.split())[:3000]
+                    full_desc = re.sub(r"<[^>]+>", " ", raw)
+                    full_desc = re.sub(r"&[a-zA-Z#0-9]+;", " ", full_desc)
+                    full_desc = re.sub(r"\s+", " ", full_desc)
+                    full_desc = full_desc.replace("  ", " ").strip()[:3000]
                     salary_match = re.search(r"\$[\d,]+\s*[-–]\s*\$[\d,]+", full_desc)
                     if salary_match:
                         salary = salary_match.group(0)
