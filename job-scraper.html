@@ -768,6 +768,27 @@ function cancelApply() {
   currentApplyJob = null;
 }
 
+function openJobLink() {
+  if (!currentApplyJob) return;
+  if (currentApplyJob.url) window.open(currentApplyJob.url, '_blank');
+}
+
+async function markAsApplied() {
+  if (!currentApplyJob) return;
+  appliedIds.add(currentApplyJob.id);
+  const card = document.getElementById('card-' + currentApplyJob.id);
+  if (card) card.classList.add('applied');
+  updateStats();
+  try {
+    await fetch(`${API_BASE}/api/jobs/${currentApplyJob.id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'applied' })
+    });
+  } catch(e) {}
+  cancelApply();
+}
+
 function copyField(fieldId) {
   const el = document.getElementById(fieldId);
   const text = el.value || el.textContent || '';
@@ -970,7 +991,8 @@ function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
     <div style="display:flex;gap:10px;justify-content:flex-end;padding-top:12px;border-top:1px solid var(--border)">
       <button onclick="toggleApplyPanel()" style="background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:10px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-family:var(--font-body)">Hide Panel</button>
-      <button onclick="openJobAndMark()" style="background:var(--accent);border:none;color:#fff;padding:10px 20px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;font-family:var(--font-body)">Open Job and Mark Applied</button>
+      <button onclick="openJobLink()" style="background:var(--surface2);border:1px solid var(--accent);color:var(--accent2);padding:10px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;font-family:var(--font-body)">Open Job Link</button>
+      <button onclick="markAsApplied()" style="background:var(--green);border:none;color:#fff;padding:10px 20px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;font-family:var(--font-body)">Mark as Applied</button>
     </div>
   </div>
 </div>
