@@ -394,16 +394,19 @@ async def generate_cover_letter(user_id: str, job_id: str):
         raise HTTPException(404, "Job or resume not found")
     profile = resume["profile"]
     skills = sum(profile.get("skills", {}).values(), [])
+    raw_text = resume.get("raw_text", "")
     response = claude.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=600,
-        messages=[{"role": "user", "content": f"""Write a professional cover letter. 3 paragraphs, under 200 words. No placeholders.
+        max_tokens=800,
+        messages=[{"role": "user", "content": f"""Write a professional cover letter according to the candidate resume and Job Description. It should be specific, professional, natural with NO AI VIBE, for this exact job. Sound like the candidate is writing it themselves as a professional with their specific experience and knowledge. 3 paragraphs, under 250 words. Sound genuine not generic. Reference specific things from the job description that match the candidate actual experience. No placeholders. Do not use phrases like I am passionate about, I am excited to, I would love to, or any generic cover letter cliches. Sign with candidate name.
 
-Candidate: {profile.get('name')}
-Skills: {', '.join(skills[:12])}
-Experience: {json.dumps(profile.get('experience', [])[:2])}
+CANDIDATE RESUME:
+{raw_text}
 
-Job: {job['title']} at {job['company']}"""}]
+JOB TITLE: {job["title"]}
+COMPANY: {job["company"]}
+JOB DESCRIPTION:
+{job.get("description", "")}"""}]
     )
     return {"cover_letter": response.content[0].text}
 
