@@ -6,6 +6,12 @@
 <title>JobHunter AI — Resume Parser</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+</script>
 <style>
   :root {
     --bg: #0a0a0f;
@@ -626,17 +632,20 @@ async function processFile(file) {
 }
 
 async function extractPDF(file) {
-  // For PDF: use PDF.js from CDN
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = async function(e) {
       try {
-        const pdfjsLib = window['pdfjs-dist/build/pdf'];
-        if (!pdfjsLib) {
-          // Fallback: just tell user we'll read it as uploaded
-          resolve('PDF content loaded — will be sent to AI for extraction.');
-          return;
+        // Store base64 for later use in job applications
+        const bytes = new Uint8Array(e.target.result);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
         }
+        window.resumePDFBase64 = btoa(binary);
+        window.resumePDFName = file.name;
+
+        // Extract text using PDF.js
         const pdf = await pdfjsLib.getDocument({ data: e.target.result }).promise;
         let text = '';
         for (let i = 1; i <= pdf.numPages; i++) {
@@ -646,7 +655,8 @@ async function extractPDF(file) {
         }
         resolve(text);
       } catch(err) {
-        resolve('PDF loaded — sending to AI for parsing.');
+        console.error('PDF extraction error:', err);
+        resolve('');
       }
     };
     reader.readAsArrayBuffer(file);
