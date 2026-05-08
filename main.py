@@ -217,11 +217,15 @@ async def run_scan_for_user(user_id: str):
         if prefs:
             location = prefs.get("location", "Remote + USA")
 
+        # Get experience level from preferences
+        exp_level = prefs.get("experience_level", "Entry Level") if prefs else "Entry Level"
+
         # 1. Scrape real jobs from Greenhouse + Lever
-        print(f"🔍 Scanning for: {target_roles}")
+        print(f"🔍 Scanning for: {target_roles} | Level: {exp_level}")
         raw_jobs = await scrape_all_boards(
             roles=target_roles,
             location=location,
+            experience_level=exp_level,
             days_back=2
         )
 

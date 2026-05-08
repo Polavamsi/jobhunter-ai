@@ -81,13 +81,25 @@ def is_full_time(job: Dict) -> bool:
     return True
 
 
+def is_appropriate_level(title: str, exp_level: str) -> bool:
+    title_lower = title.lower()
+    senior_words = ['senior', 'staff', 'principal', 'lead', 'director', 'manager', 'head of', 'vp ', 'vice president']
+    mid_words = ['staff', 'principal', 'director', 'manager', 'head of', 'vp ', 'vice president']
+    if exp_level == 'Entry Level':
+        return not any(w in title_lower for w in senior_words)
+    elif exp_level == 'Mid Level':
+        return not any(w in title_lower for w in mid_words)
+    else:
+        return True
+
 # ─── GREENHOUSE API ───────────────────────────────────────────────────────────
 
 async def scrape_greenhouse(
     client: httpx.AsyncClient,
     company: str,
     target_roles: List[str],
-    location_filter: str = "remote"
+    location_filter: str = "remote",
+    experience_level: str = "Entry Level"
 ) -> List[Dict]:
     """Fetch jobs from Greenhouse public API"""
     jobs = []
@@ -124,6 +136,10 @@ async def scrape_greenhouse(
             # Filter full-time
             if not is_full_time({"title": title}):
                 continue
+
+            # Filter by experience level
+            if not is_appropriate_level(title, experience_level):
+                continue
             
             jobs.append({
                 "external_id": make_id(title, company, "greenhouse"),
@@ -152,7 +168,8 @@ async def scrape_lever(
     client: httpx.AsyncClient,
     company: str,
     target_roles: List[str],
-    location_filter: str = "remote"
+    location_filter: str = "remote",
+    experience_level: str = "Entry Level"
 ) -> List[Dict]:
     """Fetch jobs from Lever public API"""
     jobs = []
@@ -225,6 +242,7 @@ async def scrape_lever(
 async def scrape_all_boards(
     roles: List[str],
     location: str = "Remote + USA",
+    experience_level: str = "Entry Level",
     days_back: int = 2
 ) -> List[Dict]:
     """
@@ -237,7 +255,7 @@ async def scrape_all_boards(
     async with httpx.AsyncClient() as client:
         # Run Greenhouse scrapes concurrently
         greenhouse_tasks = [
-            scrape_greenhouse(client, company, roles, location_filter)
+            scrape_greenhouse(client, company, roles, location_filter, experience_level)
             for company in GREENHOUSE_COMPANIES
         ]
         greenhouse_results = await asyncio.gather(*greenhouse_tasks, return_exceptions=True)
@@ -247,7 +265,7 @@ async def scrape_all_boards(
 
         # Run Lever scrapes concurrently
         lever_tasks = [
-            scrape_lever(client, company, roles, location_filter)
+            scrape_lever(client, company, roles, location_filter, experience_level)
             for company in LEVER_COMPANIES
         ]
         lever_results = await asyncio.gather(*lever_tasks, return_exceptions=True)
