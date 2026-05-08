@@ -733,14 +733,26 @@ async function showApplyPanel(job) {
     }
   } catch(e) {}
 
+  // Extract github from raw_text if not in profile
+  let github = profile.github || '';
+  let linkedin = profile.linkedin || '';
+  if (!github) {
+    const ghMatch = (data.raw_text || '').match(/https?:\/\/github\.com\/[\w-]+/);
+    if (ghMatch) github = ghMatch[0];
+  }
+  if (!linkedin) {
+    const liMatch = (data.raw_text || '').match(/https?:\/\/(www\.)?linkedin\.com\/in\/[\w-]+/);
+    if (liMatch) linkedin = liMatch[0];
+  }
+
   document.getElementById('ap-title').textContent = job.title;
   document.getElementById('ap-company').textContent = job.company + ' - ' + job.location;
   document.getElementById('ap-name').value = profile.name || USER_NAME || '';
   document.getElementById('ap-email').value = profile.email || '';
   document.getElementById('ap-phone').value = profile.phone || '';
-  document.getElementById('ap-location').value = profile.location || '';
-  document.getElementById('ap-linkedin').value = profile.linkedin || '';
-  document.getElementById('ap-github').value = profile.github || '';
+  document.getElementById('ap-location').value = (profile.location || '').replace('McKinsey', 'McKinney');
+  document.getElementById('ap-linkedin').value = linkedin;
+  document.getElementById('ap-github').value = github;
   document.getElementById('ap-cover').value = '';
   document.getElementById('ap-gen-btn').textContent = 'Generate with AI';
   document.getElementById('ap-gen-btn').disabled = false;
