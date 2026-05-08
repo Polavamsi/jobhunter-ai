@@ -76,7 +76,6 @@ async def startup():
         print("✅ JobHunter AI backend started")
     except Exception as e:
         print(f"⚠️ DB connection failed: {e} — app starting anyway")
-    scheduler.add_job(run_scheduled_scan, "interval", hours=3, id="auto_scan")
     scheduler.start()
 
 @app.on_event("shutdown")
@@ -241,7 +240,7 @@ async def run_scan_for_user(user_id: str):
             return
 
         # 3. AI match scoring
-        scored_jobs = await match_jobs_to_profile(claude, new_jobs, profile)
+        scored_jobs = await match_jobs_to_profile(claude, new_jobs, {**profile, "raw_text": resume.get("raw_text", "")})
 
         # 4. Save to database
         await db.save_jobs(user_id, scored_jobs)
@@ -283,61 +282,57 @@ async def run_scan_for_user(user_id: str):
 
 
 async def match_jobs_to_profile(claude_client, jobs, profile):
-    """Score jobs against user profile using Claude AI"""
+    """Score each job individually against full resume using Claude AI"""
     if not jobs:
         return []
 
-    skills = sum(profile.get("skills", {}).values(), [])
-    experience = profile.get("experience", [])
+    # Get full resume text
+    raw_text = profile.get("raw_text", "")
+    if not raw_text:
+        skills = sum(profile.get("skills", {}).values(), [])
+        experience = profile.get("experience", [])
+        raw_text = f"Title: {profile.get('title')}\nSkills: {', '.join(skills)}\nExperience: {len(experience)} roles"
 
-    # Batch into groups of 10
-    batches = [jobs[i:i+10] for i in range(0, len(jobs), 10)]
     scored = []
 
-    for batch in batches:
-        jobs_text = "\n\n".join([
-            f"Job {i+1} (id={j['external_id']}):\nTitle: {j['title']}\nCompany: {j['company']}\nDescription: {j.get('description','')[:200]}"
-            for i, j in enumerate(batch)
-        ])
-
+    for job in jobs:
+        print(f"Scoring {jobs.index(job)+1}/{len(jobs)}: {job.get('title')} @ {job.get('company')}")
         try:
             response = claude_client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=1000,
+                max_tokens=200,
                 messages=[{
                     "role": "user",
-                    "content": f"""Score these jobs against this candidate. Return ONLY a JSON array, no markdown.
+                    "content": f"""You are an experienced technical recruiter. Read both the JD and candidate's resume carefully and give an honest match score from 0 to 100. Consider whether the candidate's actual experience, skills, and background genuinely qualify them for this specific role. Be realistic — for example if the job asks for 5 years of experience and the candidate has 1 year, that's a poor match regardless of skill overlap. If the role is senior and the candidate is junior, reflect that honestly in the score. Be like a ruthless but caring mentor — score honestly so the candidate only applies to jobs they genuinely have a shot at.
 
-Candidate:
-- Title: {profile.get('title')}
-- Skills: {', '.join(skills[:15])}
-- Experience: {len(experience)} roles
+CANDIDATE RESUME:
+{raw_text}
 
-Jobs:
-{jobs_text}
+JOB TITLE: {job['title']}
+COMPANY: {job['company']}
+JOB DESCRIPTION:
+{job.get('description', 'No description available')}
 
-Return: [{{"external_id":"...","match":85,"reason":"One sentence reason"}}]
-Score 0-100. Be realistic."""
+Return only JSON, no markdown:
+{{"match": 45, "reason": "One honest sentence explaining why that score was given."}}"""
                 }]
             )
 
             import json
             raw = response.content[0].text.replace("```json", "").replace("```", "").strip()
-            scores = json.loads(raw)
-            score_map = {s["external_id"]: s for s in scores}
-
-            for j in batch:
-                score_data = score_map.get(j["external_id"], {})
-                scored.append({
-                    **j,
-                    "match": score_data.get("match", 50),
-                    "reason": score_data.get("reason", ""),
-                })
+            result = json.loads(raw)
+            scored.append({
+                **job,
+                "match": result.get("match", 50),
+                "reason": result.get("reason", "")
+            })
 
         except Exception as e:
-            print(f"Matching error: {e}")
-            for j in batch:
-                scored.append({**j, "match": 50, "reason": "AI scoring unavailable"})
+            print(f"Matching error for {job.get('title')}: {e}")
+            scored.append({**job, "match": 50, "reason": "AI scoring unavailable"})
+
+        # Prevent rate limiting
+        await asyncio.sleep(0.5)
 
     return sorted(scored, key=lambda x: x["match"], reverse=True)
 
@@ -423,6 +418,11 @@ async def get_dashboard(user_id: str):
 
 
 # ─── HEALTH ────────────────────────────────────────────────────────────────
+
+@app.delete("/api/admin/clear-jobs/{user_id}")
+async def clear_jobs(user_id: str):
+    await db.pool.execute("DELETE FROM jobs WHERE user_id = $1", user_id)
+    return {"success": True, "message": "Jobs cleared"}
 
 @app.get("/health")
 async def health():

@@ -789,7 +789,7 @@ function renderProfile(p) {
     </div>
     <div class="pref-row">
       <span class="pref-label">Experience Level</span>
-      <span class="pref-val">${prefs.experienceLevel || '—'}</span>
+      <select id="exp-level-select" class="editable" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:4px 8px;border-radius:6px;font-size:13px"><option value="Entry Level">Entry Level (0-2 yrs)</option><option value="Mid Level">Mid Level (2-5 yrs)</option><option value="Senior Level">Senior Level (5+ yrs)</option><option value="Any Level">Any Level</option></select>
     </div>
     <div class="pref-row">
       <span class="pref-label">Open to Remote</span>
@@ -838,9 +838,52 @@ function resetAll() {
   });
 }
 
-function saveProfile() {
-  setStep(3, 'done'); setStep(4, 'active');
-  alert('✅ Profile saved! Your AI agent is now active and will start hunting for Data Scientist, Data Analyst, and related jobs across all 10 job boards.\n\nYou can monitor everything from the Job Tracker dashboard.');
+async function saveProfile() {
+  if (!parsedProfile) {
+    alert('Please parse your resume first.');
+    return;
+  }
+
+  setStep(3, 'done');
+  setStep(4, 'active');
+
+  // Get experience level from dropdown
+  const expLevel = document.getElementById('exp-level-select') ?
+    document.getElementById('exp-level-select').value : 'Entry Level';
+
+  // Get target roles from editable field
+  const rolesInput = document.querySelector('.editable[placeholder*="role"], .editable');
+  const roles = rolesInput ?
+    rolesInput.value.split(',').map(r => r.trim()).filter(r => r) :
+    (parsedProfile.jobPreferences?.targetRoles || []);
+
+  try {
+    // Save preferences to backend
+    const prefsRes = await fetch(`${API_BASE}/api/preferences`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: USER_ID,
+        roles: roles,
+        location: 'Remote + USA',
+        experience_level: expLevel,
+        min_match_threshold: 75,
+        max_applies_per_day: 25,
+        auto_apply_enabled: true,
+        generate_cover_letters: true,
+        scan_frequency_hours: 3
+      })
+    });
+
+    if (!prefsRes.ok) throw new Error('Failed to save preferences');
+
+    const roleText = roles.length > 0 ? roles.join(', ') : 'your target roles';
+    alert(`✅ Profile saved! Your AI agent is now active and will start hunting for ${roleText} across all 10 job boards.\n\nExperience level: ${expLevel}\n\nYou can monitor everything from the Job Tracker dashboard.`);
+
+  } catch(err) {
+    console.error('Save error:', err);
+    alert('Profile saved locally. Could not sync to server — please try again.');
+  }
 }
 
 function goTo(page) {

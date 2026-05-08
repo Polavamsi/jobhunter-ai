@@ -4,6 +4,7 @@ No bot detection, no Playwright needed for finding jobs.
 """
 
 import httpx
+import re
 import asyncio
 import hashlib
 from typing import List, Dict
@@ -191,12 +192,13 @@ async def scrape_lever(
                 continue
             
             # Build description from job lists
-            description = ""
+            description = job.get("descriptionPlain", "")
+            # Add lists content (What You'll Do, Who You Are)
             lists = job.get("lists", [])
-            for lst in lists[:2]:
-                description += lst.get("text", "") + " "
-            description = description[:500]
-
+            for lst in lists:
+                content = re.sub("<[^>]+>", " ", lst.get("content", ""))
+                description += f"\n{lst.get('text', '')}: {content}"
+            description = description[:3000]
             jobs.append({
                 "external_id": make_id(title, company, "lever"),
                 "title": title,
