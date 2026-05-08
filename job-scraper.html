@@ -725,11 +725,13 @@ async function applyToJob(id) {
 
 async function showApplyPanel(job) {
   let profile = {};
+  let rawText = "";
   try {
     const res = await fetch(`${API_BASE}/api/resume/${USER_ID}`);
     if (res.ok) {
       const data = await res.json();
       profile = data.profile || {};
+      rawText = data.raw_text || "";
     }
   } catch(e) {}
 
@@ -737,11 +739,11 @@ async function showApplyPanel(job) {
   let github = profile.github || '';
   let linkedin = profile.linkedin || '';
   if (!github) {
-    const ghMatch = (data.raw_text || '').match(/https?:\/\/github\.com\/[\w-]+/);
+    const ghMatch = (rawText).match(/https?:\/\/github\.com\/[\w-]+/);
     if (ghMatch) github = ghMatch[0];
   }
   if (!linkedin) {
-    const liMatch = (data.raw_text || '').match(/https?:\/\/(www\.)?linkedin\.com\/in\/[\w-]+/);
+    const liMatch = (rawText).match(/https?:\/\/(www\.)?linkedin\.com\/in\/[\w-]+/);
     if (liMatch) linkedin = liMatch[0];
   }
 
