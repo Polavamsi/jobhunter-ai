@@ -811,15 +811,8 @@ async function generateCoverLetter() {
   btn.disabled = true;
 
   try {
-    const res = await fetch(`${API_BASE}/api/cover-letter/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        user_id: USER_ID,
-        job_title: currentApplyJob.title,
-        company: currentApplyJob.company,
-        job_description: currentApplyJob.desc || currentApplyJob.description || ''
-      })
+    const res = await fetch(`${API_BASE}/api/cover-letter/generate?user_id=${USER_ID}&job_id=${currentApplyJob.id}`, {
+      method: 'POST'
     });
     const data = await res.json();
     document.getElementById('ap-cover').value = data.cover_letter || 'Could not generate. Please write manually.';
