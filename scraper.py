@@ -39,6 +39,44 @@ LEVER_COMPANIES = [
     "salesforce", "servicenow", "workday", "oracle", "sap"
 ]
 
+# Companies using Ashby ATS
+ASHBY_COMPANIES = [
+    # US AI/Tech companies
+    "openai", "notion", "ramp", "rippling", "retool",
+    "perplexity", "cursor", "glean", "harvey", "cohere",
+    "mistral", "scale-ai", "weights-biases", "huggingface",
+    "replit", "coreweave", "together-ai", "anyscale",
+    # Indian product companies (high paying)
+    "zepto", "razorpay-software", "groww", "browserstack",
+    "postman", "hasura", "setu"
+]
+
+# Companies using Ashby ATS - US focused
+ASHBY_COMPANIES_US = [
+    "openai", "notion", "ramp", "rippling", "retool",
+    "perplexity", "cursor", "glean", "harvey", "cohere",
+    "replit", "coreweave", "anyscale", "together-ai",
+    "weights-biases", "huggingface",
+]
+
+# Indian companies on Ashby - only high paying (25LPA+)
+ASHBY_COMPANIES_INDIA = [
+    "zepto", "groww", "browserstack", "postman", "hasura",
+]
+
+# Indian companies on Lever - only high paying
+LEVER_COMPANIES_INDIA = [
+    "razorpay", "swiggy", "cred",
+]
+
+# Indian companies on Greenhouse - only high paying
+GREENHOUSE_COMPANIES_INDIA = [
+    "freshworks", "meesho",
+]
+
+# Minimum salary for India roles in INR (25 LPA)
+INDIA_MIN_SALARY_INR = 2500000
+
 # Keywords to match against user's target roles
 ROLE_KEYWORDS = {
     "data scientist": ["data scientist", "data science", "ml scientist", "research scientist"],
@@ -80,6 +118,28 @@ def is_full_time(job: Dict) -> bool:
             return False
     return True
 
+
+def is_india_location(location: str, secondary_locations: list = []) -> bool:
+    india_keywords = ["india", "bangalore", "bengaluru", "mumbai", "hyderabad",
+                      "delhi", "pune", "chennai", "noida", "gurgaon", "gurugram"]
+    all_locs = [location.lower()] + [s.get("location", "").lower() for s in secondary_locations]
+    return any(kw in loc for loc in all_locs for kw in india_keywords)
+
+def passes_india_salary_filter(description: str) -> bool:
+    lpa_match = re.search(r"(\d+)\s*[-–]\s*(\d+)\s*LPA", description, re.IGNORECASE)
+    if lpa_match:
+        max_lpa = max(int(lpa_match.group(1)), int(lpa_match.group(2)))
+        return max_lpa * 100000 >= INDIA_MIN_SALARY_INR
+    single_lpa = re.search(r"(\d+)\s*LPA", description, re.IGNORECASE)
+    if single_lpa:
+        lpa = int(single_lpa.group(1))
+        return lpa * 100000 >= INDIA_MIN_SALARY_INR
+    inr_match = re.search(r"[₹][\d,]+\s*[-–]\s*[₹][\d,]+", description)
+    if inr_match:
+        numbers = re.findall(r"\d+", inr_match.group(0).replace(",", ""))
+        if numbers:
+            return max(int(n) for n in numbers) >= INDIA_MIN_SALARY_INR
+    return True  # No salary mentioned - pass through, company whitelist is primary filter
 
 def is_appropriate_level(title: str, exp_level: str) -> bool:
     title_lower = title.lower()
@@ -290,6 +350,26 @@ async def scrape_all_boards(
         ]
         lever_results = await asyncio.gather(*lever_tasks, return_exceptions=True)
         for result in lever_results:
+            if isinstance(result, list):
+                all_jobs.extend(result)
+
+        # Ashby - US companies
+        ashby_us_tasks = [
+            scrape_ashby(client, company, roles, location_filter, experience_level, india_mode=False)
+            for company in ASHBY_COMPANIES_US
+        ]
+        ashby_us_results = await asyncio.gather(*ashby_us_tasks, return_exceptions=True)
+        for result in ashby_us_results:
+            if isinstance(result, list):
+                all_jobs.extend(result)
+
+        # Ashby - India companies (high paying only)
+        ashby_india_tasks = [
+            scrape_ashby(client, company, roles, location_filter, experience_level, india_mode=True)
+            for company in ASHBY_COMPANIES_INDIA
+        ]
+        ashby_india_results = await asyncio.gather(*ashby_india_tasks, return_exceptions=True)
+        for result in ashby_india_results:
             if isinstance(result, list):
                 all_jobs.extend(result)
 
