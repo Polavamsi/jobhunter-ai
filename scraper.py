@@ -319,6 +319,100 @@ async def scrape_lever(
 
 # ─── MAIN SCRAPER ─────────────────────────────────────────────────────────────
 
+
+async def scrape_ashby(
+    client: httpx.AsyncClient,
+    company: str,
+    target_roles: List[str],
+    location_filter: str = "remote",
+    experience_level: str = "Entry Level",
+    india_mode: bool = False
+) -> List[Dict]:
+    """Fetch jobs from Ashby public API"""
+    jobs = []
+    try:
+        url = f"https://api.ashbyhq.com/posting-api/job-board/{company}"
+        response = await client.get(url, timeout=10)
+
+        if response.status_code != 200:
+            return []
+
+        data = response.json()
+        all_jobs = data.get("jobs", [])
+
+        for job in all_jobs:
+            title = job.get("title", "").strip()
+            location = job.get("location", "")
+            employment_type = job.get("employmentType", "")
+            secondary = job.get("secondaryLocations", [])
+
+            if not matches_roles(title, target_roles):
+                continue
+
+            if employment_type and "fulltime" not in employment_type.lower().replace("-", "").replace(" ", ""):
+                continue
+
+            if not is_appropriate_level(title, experience_level):
+                continue
+
+            job_is_india = is_india_location(location, secondary)
+
+            if india_mode:
+                if not job_is_india:
+                    continue
+            else:
+                if job_is_india:
+                    continue
+                all_locs = [location.lower()] + [s.get("location", "").lower() for s in secondary]
+                is_remote = any("remote" in loc for loc in all_locs)
+                is_us = any(
+                    state in loc for loc in all_locs
+                    for state in [
+                        "new york", "san francisco", "seattle", "austin", "boston",
+                        "chicago", "los angeles", "denver", "united states", "usa",
+                        ", ny", ", ca", ", tx", ", wa", ", ma", ", il"
+                    ]
+                )
+                if not (is_remote or is_us):
+                    continue
+
+            description = job.get("descriptionPlain", "")
+            if not description:
+                description = re.sub("<[^>]+>", " ", job.get("descriptionHtml", ""))
+                description = re.sub(r"&[a-zA-Z#0-9]+;", " ", description)
+                description = " ".join(description.split())
+            description = description[:3000]
+
+            if india_mode and not passes_india_salary_filter(description):
+                continue
+
+            salary = ""
+            sal_match = re.search(r"\$[\d,]+\s*[-]\s*\$[\d,]+", description)
+            if not sal_match:
+                sal_match = re.search(r"(\d+)\s*[-]\s*(\d+)\s*LPA", description, re.IGNORECASE)
+            if sal_match:
+                salary = sal_match.group(0)
+
+            jobs.append({
+                "external_id": make_id(title, company, "ashby"),
+                "title": title,
+                "company": company.replace("-", " ").title(),
+                "location": location or "Remote",
+                "salary": salary,
+                "description": description,
+                "skills": [],
+                "board": "Ashby",
+                "url": job.get("jobUrl", ""),
+                "posted": job.get("publishedAt", ""),
+                "is_easy_apply": False,
+                "ats": "ashby"
+            })
+
+    except Exception as e:
+        print(f"Ashby error for {company}: {e}")
+
+    return jobs
+
 async def scrape_all_boards(
     roles: List[str],
     location: str = "Remote + USA",
