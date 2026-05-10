@@ -220,7 +220,7 @@ class Database:
                     j.get("match", 0), j.get("reason", "")
                 )
 
-    async def get_jobs(self, user_id: str, status=None, board=None, limit=50):
+    async def get_jobs(self, user_id: str, status=None, board=None, limit=200):
         async with self.pool.acquire() as conn:
             query = "SELECT * FROM jobs WHERE user_id = $1"
             params = [user_id]

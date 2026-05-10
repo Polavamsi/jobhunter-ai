@@ -349,7 +349,7 @@ async def run_scheduled_scan():
 # ─── JOBS ──────────────────────────────────────────────────────────────────
 
 @app.get("/api/jobs/{user_id}")
-async def get_jobs(user_id: str, status: Optional[str] = None, board: Optional[str] = None, limit: int = 50):
+async def get_jobs(user_id: str, status: Optional[str] = None, board: Optional[str] = None, limit: int = 200):
     jobs = await db.get_jobs(user_id, status=status, board=board, limit=limit)
     return {"jobs": jobs, "total": len(jobs)}
 
