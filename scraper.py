@@ -14,12 +14,11 @@ from datetime import datetime, timezone
 def is_us_or_remote_location(location: str) -> bool:
     if not location:
         return True
+    
     loc = location.lower().strip()
     
     US_INDICATORS = {
-        # Generic
-        "remote", "united states", "usa", "u.s.", "us",
-        # All 50 states full names
+        "united states", "usa", "u.s.",
         "alabama", "alaska", "arizona", "arkansas",
         "california", "colorado", "connecticut", "delaware",
         "florida", "georgia", "hawaii", "idaho", "illinois",
@@ -32,7 +31,6 @@ def is_us_or_remote_location(location: str) -> bool:
         "rhode island", "south carolina", "south dakota",
         "tennessee", "texas", "utah", "vermont", "virginia",
         "washington", "west virginia", "wisconsin", "wyoming",
-        # State abbreviations with comma (", ne" etc)
         ", al", ", ak", ", az", ", ar", ", ca", ", co",
         ", ct", ", de", ", fl", ", ga", ", hi", ", id",
         ", il", ", in", ", ia", ", ks", ", ky", ", la",
@@ -44,11 +42,23 @@ def is_us_or_remote_location(location: str) -> bool:
         ", wi", ", wy",
     }
     
-    for indicator in US_INDICATORS:
-        if indicator in loc:
-            remainder = loc.replace(indicator, "").strip(" ()-,–")
-            if not remainder:
-                return True
+    # Check US state/city indicators first
+    if any(indicator in loc for indicator in US_INDICATORS):
+        return True
+    
+    # Handle remote — check what comes after
+    if "remote" in loc:
+        remainder = loc.replace("remote", "").strip(" ()-,–")
+        # Empty remainder = pure remote = allow
+        if not remainder:
+            return True
+        # Remainder is a US indicator = allow
+        if any(indicator in remainder for indicator in US_INDICATORS):
+            return True
+        # Remainder is something else = foreign remote = reject
+        return False
+    
+    # No US indicator, no remote = reject
     return False
 
 # ─── COMPANY LISTS ───────────────────────────────────────────────────────────
