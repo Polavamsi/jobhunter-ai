@@ -11,6 +11,46 @@ from typing import List, Dict
 from datetime import datetime, timezone
 
 
+def is_us_or_remote_location(location: str) -> bool:
+    if not location:
+        return True
+    loc = location.lower().strip()
+    
+    US_INDICATORS = {
+        # Generic
+        "remote", "united states", "usa", "u.s.", "us",
+        # All 50 states full names
+        "alabama", "alaska", "arizona", "arkansas",
+        "california", "colorado", "connecticut", "delaware",
+        "florida", "georgia", "hawaii", "idaho", "illinois",
+        "indiana", "iowa", "kansas", "kentucky", "louisiana",
+        "maine", "maryland", "massachusetts", "michigan",
+        "minnesota", "mississippi", "missouri", "montana",
+        "nebraska", "nevada", "new hampshire", "new jersey",
+        "new mexico", "new york", "north carolina", "north dakota",
+        "ohio", "oklahoma", "oregon", "pennsylvania",
+        "rhode island", "south carolina", "south dakota",
+        "tennessee", "texas", "utah", "vermont", "virginia",
+        "washington", "west virginia", "wisconsin", "wyoming",
+        # State abbreviations with comma (", ne" etc)
+        ", al", ", ak", ", az", ", ar", ", ca", ", co",
+        ", ct", ", de", ", fl", ", ga", ", hi", ", id",
+        ", il", ", in", ", ia", ", ks", ", ky", ", la",
+        ", me", ", md", ", ma", ", mi", ", mn", ", ms",
+        ", mo", ", mt", ", ne", ", nv", ", nh", ", nj",
+        ", nm", ", ny", ", nc", ", nd", ", oh", ", ok",
+        ", or", ", pa", ", ri", ", sc", ", sd", ", tn",
+        ", tx", ", ut", ", vt", ", va", ", wa", ", wv",
+        ", wi", ", wy",
+    }
+    
+    for indicator in US_INDICATORS:
+        if indicator in loc:
+            remainder = loc.replace(indicator, "").strip(" ()-,–")
+            if not remainder:
+                return True
+    return False
+
 # ─── COMPANY LISTS ───────────────────────────────────────────────────────────
 
 # Companies using Greenhouse ATS
@@ -182,15 +222,7 @@ async def scrape_greenhouse(
                 continue
             
             # Filter by location (remote or US)
-            location_lower = location.lower()
-            is_remote = "remote" in location_lower
-            is_us = any(state in location_lower for state in [
-                "new york", "san francisco", "seattle", "austin", "boston",
-                "chicago", "los angeles", "denver", "atlanta", ", ny", ", ca",
-                ", tx", ", wa", ", ma", ", il", "united states", "usa", "us"
-            ])
-            
-            if location_filter == "remote" and not (is_remote or is_us):
+            if not is_us_or_remote_location(location):
                 continue
             
             # Filter full-time
@@ -278,14 +310,7 @@ async def scrape_lever(
                 continue
             
             # Filter by location
-            location_lower = location.lower()
-            is_remote = "remote" in location_lower
-            is_us = any(state in location_lower for state in [
-                "new york", "san francisco", "seattle", "austin", "boston",
-                "chicago", "los angeles", "denver", "united states", "usa"
-            ])
-            
-            if location_filter == "remote" and not (is_remote or is_us):
+            if not is_us_or_remote_location(location):
                 continue
             
             # Build description from job lists
@@ -363,17 +388,7 @@ async def scrape_ashby(
             else:
                 if job_is_india:
                     continue
-                all_locs = [location.lower()] + [s.get("location", "").lower() for s in secondary]
-                is_remote = any("remote" in loc for loc in all_locs)
-                is_us = any(
-                    state in loc for loc in all_locs
-                    for state in [
-                        "new york", "san francisco", "seattle", "austin", "boston",
-                        "chicago", "los angeles", "denver", "united states", "usa",
-                        ", ny", ", ca", ", tx", ", wa", ", ma", ", il"
-                    ]
-                )
-                if not (is_remote or is_us):
+                if not is_us_or_remote_location(location):
                     continue
 
             description = job.get("descriptionPlain", "")
