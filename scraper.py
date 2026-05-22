@@ -11,14 +11,15 @@ from typing import List, Dict
 from datetime import datetime, timezone
 
 
+import re
+
 def is_us_or_remote_location(location: str) -> bool:
     if not location:
         return True
     
     loc = location.lower().strip()
     
-    US_INDICATORS = {
-        "united states", "usa", "u.s.",
+    US_STATES_FULL = {
         "alabama", "alaska", "arizona", "arkansas",
         "california", "colorado", "connecticut", "delaware",
         "florida", "georgia", "hawaii", "idaho", "illinois",
@@ -31,34 +32,40 @@ def is_us_or_remote_location(location: str) -> bool:
         "rhode island", "south carolina", "south dakota",
         "tennessee", "texas", "utah", "vermont", "virginia",
         "washington", "west virginia", "wisconsin", "wyoming",
-        ", al", ", ak", ", az", ", ar", ", ca", ", co",
-        ", ct", ", de", ", fl", ", ga", ", hi", ", id",
-        ", il", ", in", ", ia", ", ks", ", ky", ", la",
-        ", me", ", md", ", ma", ", mi", ", mn", ", ms",
-        ", mo", ", mt", ", ne", ", nv", ", nh", ", nj",
-        ", nm", ", ny", ", nc", ", nd", ", oh", ", ok",
-        ", or", ", pa", ", ri", ", sc", ", sd", ", tn",
-        ", tx", ", ut", ", vt", ", va", ", wa", ", wv",
-        ", wi", ", wy",
+        "united states", "usa", "u.s."
     }
     
-    # Check US state/city indicators first
-    if any(indicator in loc for indicator in US_INDICATORS):
+    ABBREVS = '|'.join([
+        'al','ak','az','ar','ca','co','ct','de','fl','ga',
+        'hi','id','il','in','ia','ks','ky','la','me','md',
+        'ma','mi','mn','ms','mo','mt','ne','nv','nh','nj',
+        'nm','ny','nc','nd','oh','ok','or','pa','ri','sc',
+        'sd','tn','tx','ut','vt','va','wa','wv','wi','wy'
+    ])
+    ABBREV_PATTERN = re.compile(r',\s*(' + ABBREVS + r')\b')
+    
+    # Check full state names
+    if any(state in loc for state in US_STATES_FULL):
         return True
     
-    # Handle remote — check what comes after
+    # Check state abbreviations as whole words
+    if ABBREV_PATTERN.search(loc):
+        return True
+    
+    # Handle remote
     if "remote" in loc:
         remainder = loc.replace("remote", "").strip(" ()-,–")
-        # Empty remainder = pure remote = allow
+        # Pure remote — no qualifier
         if not remainder:
             return True
-        # Remainder is a US indicator = allow
-        if any(indicator in remainder for indicator in US_INDICATORS):
+        # Remote + US indicator
+        if any(state in remainder for state in US_STATES_FULL):
             return True
-        # Remainder is something else = foreign remote = reject
+        if ABBREV_PATTERN.search(remainder):
+            return True
+        # Remote + something else = foreign remote
         return False
     
-    # No US indicator, no remote = reject
     return False
 
 # ─── COMPANY LISTS ───────────────────────────────────────────────────────────
