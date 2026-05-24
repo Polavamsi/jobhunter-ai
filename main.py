@@ -123,14 +123,14 @@ Schema:
   "location": "City, State",
   "email": "email",
   "phone": "phone",
-  "summary": "2-sentence summary",
+  "summary": "read and understand and analyze the resume, write a summary which is professional, natural yet not sound like AI assisted. keep it 2 sentences and according to resume and candidate actual experience",
   "skills": {{"languages":[],"ml":[],"cloud":[],"databases":[]}},
   "experience": [{{"role":"","company":"","period":""}}],
   "certifications": [],
   "projects": [],
   "jobPreferences": {{
-    "targetRoles": [],
-    "targetIndustries": [],
+    "targetRoles": ["extract 4-6 real current job market titles that match this candidate based on their experience, skills, and summary. Use titles actively posted in 2025-2026 such as Software Engineer, Full Stack Engineer, Backend Engineer, SDE I, etc."],
+    "targetIndustries": ["extract relevant industries this candidate can work in based on their skills and experience. Include broad categories like Technology, Software Development, Financial Technology, Healthcare Technology, E-commerce, SaaS, AI/ML, Cloud Computing etc. Be inclusive — candidate is open to any industry."],
     "experienceLevel": "",
     "openToRemote": true,
     "openToRelocation": true
@@ -205,11 +205,9 @@ async def run_scan_for_user(user_id: str):
         profile = resume.get("profile", {})
         
         # Get target roles from profile or preferences
-        target_roles = []
-        if prefs:
+        target_roles = profile.get("jobPreferences", {}).get("targetRoles", [])
+        if not target_roles and prefs:
             target_roles = prefs.get("roles", [])
-        if not target_roles:
-            target_roles = profile.get("jobPreferences", {}).get("targetRoles", [])
         if not target_roles:
             target_roles = ["Software Engineer", "Data Scientist", "Data Analyst"]
 
@@ -237,7 +235,7 @@ async def run_scan_for_user(user_id: str):
         # 2. Filter already-seen jobs
         existing_ids = await db.get_seen_job_ids(user_id)
         new_jobs = [j for j in raw_jobs if j["external_id"] not in existing_ids]
-        print(f"📋 {len(new_jobs)} new jobs (filtered {len(raw_jobs) - len(new_jobs)} already seen)")
+        print(f"{len(new_jobs)} new jobs (filtered {len(raw_jobs) - len(new_jobs)} already seen)")
 
         if not new_jobs:
             await db.update_scan_status(user_id, "idle", jobs_found=0)
@@ -253,7 +251,7 @@ async def run_scan_for_user(user_id: str):
         # 5. Log activity
         await db.log_activity(
             user_id, "scan",
-            f"✅ Scan complete — found {len(new_jobs)} new jobs across Greenhouse and Lever",
+            f"Scan complete — found {len(new_jobs)} new jobs across Greenhouse and Lever",
             {"jobs_found": len(new_jobs), "roles": target_roles}
         )
 
