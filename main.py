@@ -30,7 +30,36 @@ app.add_middleware(
 
 claude = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 scheduler = AsyncIOScheduler()
-
+async def call_claude(model: str, max_tokens: int, messages: list, max_retries: int = 3):
+    """
+    Call Claude with retries on transient errors (overload 529, rate limit 429,
+    timeouts, 5xx). Runs the sync SDK call in a thread so it never blocks the
+    event loop. Raises the last error only if all retries are exhausted.
+    """
+    last_err = None
+    for attempt in range(max_retries):
+        try:
+            return await asyncio.to_thread(
+                claude.messages.create,
+                model=model,
+                max_tokens=max_tokens,
+                messages=messages,
+            )
+        except anthropic.APIConnectionError as e:        # network / timeout
+            last_err = e
+            wait = (2 ** attempt) * 2                     # 2s, 4s, 8s
+            print(f"⚠️ Claude connection error (attempt {attempt+1}/{max_retries}) — retry in {wait}s")
+            await asyncio.sleep(wait)
+        except anthropic.APIStatusError as e:            # HTTP status errors
+            code = getattr(e, "status_code", 500)
+            if code == 429 or code >= 500:               # rate limit / overload / server
+                last_err = e
+                wait = (2 ** attempt) * 2
+                print(f"⚠️ Claude {code} (attempt {attempt+1}/{max_retries}) — retry in {wait}s")
+                await asyncio.sleep(wait)
+            else:                                        # 4xx (bad request) — don't retry
+                raise
+    raise last_err
 
 # ─── MODELS ────────────────────────────────────────────────────────────────
 
@@ -141,13 +170,18 @@ Schema:
 Resume:
 {payload.resume_text}"""
 
-    response = claude.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1500,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    raw = response.content[0].text.replace("```json", "").replace("```", "").strip()
-    profile = json.loads(raw)
+    try:
+        response = await call_claude(
+            "claude-haiku-4-5-20251001", 1500,
+            [{"role": "user", "content": prompt}]
+        )
+        raw = response.content[0].text.replace("```json", "").replace("```", "").strip()
+        profile = json.loads(raw)
+    except json.JSONDecodeError:
+        raise HTTPException(502, "Resume parsing returned invalid data — please try again.")
+    except Exception as e:
+        print(f"Resume parse error: {e}")
+        raise HTTPException(503, "Resume parsing is temporarily busy — please try again in a moment.")
     try:
         await db.save_resume(payload.user_id, payload.resume_text, profile)
     except Exception as e:
@@ -181,8 +215,11 @@ async def get_preferences(user_id: str):
 
 @app.post("/api/scan/{user_id}")
 async def trigger_scan(user_id: str, background_tasks: BackgroundTasks):
+    # Write "queued" synchronously BEFORE returning, so the frontend never
+    # reads a stale "idle"/"complete" from a previous scan (the phantom-done bug).
+    await db.update_scan_status(user_id, "queued")
     background_tasks.add_task(run_scan_for_user, user_id)
-    return {"success": True, "message": "Scan started in background"}
+    return {"success": True, "message": "Scan queued"}
 
 @app.get("/api/scan/status/{user_id}")
 async def get_scan_status(user_id: str):
@@ -199,7 +236,7 @@ async def run_scan_for_user(user_id: str):
 
         if not resume:
             print(f"No resume found for user {user_id}")
-            await db.update_scan_status(user_id, "idle", jobs_found=0)
+            await db.update_scan_status(user_id, "complete", jobs_found=0)
             return
 
         profile = resume.get("profile", {})
@@ -229,7 +266,7 @@ async def run_scan_for_user(user_id: str):
 
         if not raw_jobs:
             print("No jobs found in this scan")
-            await db.update_scan_status(user_id, "idle", jobs_found=0)
+            await db.update_scan_status(user_id, "complete", jobs_found=0)
             return
 
         # 2. Filter already-seen jobs
@@ -238,15 +275,16 @@ async def run_scan_for_user(user_id: str):
         print(f"{len(new_jobs)} new jobs (filtered {len(raw_jobs) - len(new_jobs)} already seen)")
 
         if not new_jobs:
-            await db.update_scan_status(user_id, "idle", jobs_found=0)
+            await db.update_scan_status(user_id, "complete", jobs_found=0)
             return
 
         # 3. AI match scoring
+        await db.update_scan_status(user_id, "scoring")
         scored_jobs = await match_jobs_to_profile(claude, new_jobs, {**profile, "raw_text": resume.get("raw_text", "")})
 
         # 4. Save to database
         await db.save_jobs(user_id, scored_jobs)
-        await db.update_scan_status(user_id, "idle", jobs_found=len(new_jobs))
+        await db.update_scan_status(user_id, "complete", jobs_found=len(new_jobs))
 
         # 5. Log activity
         await db.log_activity(
@@ -300,10 +338,9 @@ async def match_jobs_to_profile(claude_client, jobs, profile):
     for job in jobs:
         print(f"Scoring {jobs.index(job)+1}/{len(jobs)}: {job.get('title')} @ {job.get('company')}")
         try:
-            response = claude_client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=200,
-                messages=[{
+            response = await call_claude(
+                "claude-haiku-4-5-20251001", 200,
+                [{
                     "role": "user",
                     "content": f"""You are an experienced technical recruiter. Read both the JD and candidate's resume carefully and give an honest match score from 0 to 100. Consider whether the candidate's actual experience, skills, and background genuinely qualify them for this specific role. Be realistic — for example if the job asks for 5 years of experience and the candidate has 1 year, that's a poor match regardless of skill overlap. If the role is senior and the candidate is junior, reflect that honestly in the score. Be like a ruthless but caring mentor — score honestly so the candidate only applies to jobs they genuinely have a shot at.
 
@@ -393,9 +430,8 @@ async def generate_cover_letter(user_id: str, job_id: str):
     profile = resume["profile"]
     skills = sum(profile.get("skills", {}).values(), [])
     raw_text = resume.get("raw_text", "")
-    response = claude.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=800,
+    response = await call_claude(
+        "claude-haiku-4-5-20251001", 800,
         messages=[{"role": "user", "content": f"""Write a professional cover letter according to the candidate resume and Job Description. It should be specific, professional, natural with NO AI VIBE, for this exact job. Sound like the candidate is writing it themselves as a professional with their specific experience and knowledge. 3 paragraphs, under 250 words. Sound genuine not generic. Reference specific things from the job description that match the candidate actual experience. No placeholders. Do not use phrases like I am passionate about, I am excited to, I would love to, or any generic cover letter cliches. Sign with candidate name.
 
 CANDIDATE RESUME:

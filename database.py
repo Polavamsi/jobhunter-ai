@@ -314,11 +314,21 @@ class Database:
 
     async def update_scan_status(self, user_id: str, status: str, jobs_found: int = 0):
         async with self.pool.acquire() as conn:
-            await conn.execute("""
-                INSERT INTO scan_status (user_id, status, last_scan, jobs_found)
-                VALUES ($1,$2,NOW(),$3)
-                ON CONFLICT (user_id) DO UPDATE SET status=$2, last_scan=NOW(), jobs_found=$3
-            """, user_id, status, jobs_found)
+            if status == "complete":
+                # Terminal success: stamp completion time + final count
+                await conn.execute("""
+                    INSERT INTO scan_status (user_id, status, last_scan, jobs_found)
+                    VALUES ($1,$2,NOW(),$3)
+                    ON CONFLICT (user_id) DO UPDATE SET status=$2, last_scan=NOW(), jobs_found=$3
+                """, user_id, status, jobs_found)
+            else:
+                # queued / scanning / scoring / error: update status only,
+                # preserve the previous last_scan and jobs_found
+                await conn.execute("""
+                    INSERT INTO scan_status (user_id, status, jobs_found)
+                    VALUES ($1,$2,0)
+                    ON CONFLICT (user_id) DO UPDATE SET status=$2
+                """, user_id, status)
 
     # ── DASHBOARD ──────────────────────────
 
