@@ -293,26 +293,10 @@ async def run_scan_for_user(user_id: str):
             {"jobs_found": len(new_jobs), "roles": target_roles}
         )
 
-        # 6. Auto-apply if enabled
-        if prefs and prefs.get("auto_apply_enabled"):
-            threshold = prefs.get("min_match_threshold", 75)
-            daily_limit = prefs.get("max_applies_per_day", 25)
-            todays_count = await db.get_todays_apply_count(user_id)
-            remaining = daily_limit - todays_count
-
-            high_matches = [
-                j for j in scored_jobs
-                if j.get("match", 0) >= threshold
-                and not j.get("is_easy_apply", False)
-            ][:remaining]
-
-            print(f"⚡ Auto-applying to {len(high_matches)} high-match jobs")
-            for job in high_matches:
-                try:
-                    from applier import auto_apply_to_job
-                    await auto_apply_to_job(user_id, job, claude, prefs or {})
-                except Exception as e:
-                    print(f"Apply error: {e}")
+        # 6. Auto-apply RETIRED — we no longer auto-submit applications.
+        #    Server-side auto-submit meant ToS/ban risk, fabricated data,
+        #    and unverifiable success. Being replaced by the Application
+        #    Assistant: prepare tailored answers, the USER reviews + submits.
 
     except Exception as e:
         await db.update_scan_status(user_id, "error")
