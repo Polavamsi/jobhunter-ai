@@ -300,7 +300,6 @@
       </div>
       <div class="config-actions">
         <button class="btn btn-primary" onclick="startScan()" id="scan-btn2">🔍 Scan All Job Boards</button>
-        <button class="btn btn-green" id="apply-all-btn" onclick="applyToAll()" style="display:none">⚡ Auto-Apply to All High Matches</button>
         <div class="match-threshold">
           Min Match:
           <input type="range" min="50" max="95" value="75" step="5" oninput="document.getElementById('thresh-val').textContent=this.value+'%'" style="width:80px"/>
@@ -313,19 +312,12 @@
     <div class="scan-banner idle animate-in" id="scan-banner">
       <div class="scan-icon" id="scan-icon">🌐</div>
       <div class="scan-info">
-        <div class="scan-title" id="scan-title">Ready to scan 10 job boards</div>
+        <div class="scan-title" id="scan-title">Ready to scan Greenhouse, Lever & Ashby</div>
         <div class="scan-sub" id="scan-sub">Searching for Data Scientist, Data Analyst, Full Stack Developer, ML Engineer · Remote + USA · Last 48 hrs</div>
         <div class="board-scan-list" id="board-scan-list">
-          <span class="board-chip" data-board="LinkedIn">LinkedIn</span>
-          <span class="board-chip" data-board="Indeed">Indeed</span>
-          <span class="board-chip" data-board="Glassdoor">Glassdoor</span>
-          <span class="board-chip" data-board="ZipRecruiter">ZipRecruiter</span>
-          <span class="board-chip" data-board="Dice">Dice</span>
-          <span class="board-chip" data-board="Monster">Monster</span>
-          <span class="board-chip" data-board="AngelList">AngelList</span>
-          <span class="board-chip" data-board="Naukri">Naukri</span>
-          <span class="board-chip" data-board="CareerBuilder">CareerBuilder</span>
-          <span class="board-chip" data-board="SimplyHired">SimplyHired</span>
+          <span class="board-chip" data-board="Greenhouse">Greenhouse</span>
+          <span class="board-chip" data-board="Lever">Lever</span>
+          <span class="board-chip" data-board="Ashby">Ashby</span>
         </div>
         <div class="scan-progress" id="scan-progress"><div class="scan-progress-fill" id="scan-fill"></div></div>
       </div>
@@ -409,7 +401,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="document.getElementById('modal').classList.remove('open')">Close</button>
-      <button class="btn action-apply" id="m-apply-btn" onclick="applyFromModal()">⚡ Auto-Apply Now</button>
+      <button class="btn action-apply" id="m-apply-btn" onclick="applyFromModal()">📋 Prepare Application</button>
     </div>
   </div>
 </div>
@@ -505,17 +497,22 @@ async function startScan() {
     // Wait for animation to finish
     await chipAnim;
 
-    document.getElementById('scan-sub').textContent = 'AI is scoring job matches…';
-    fill.style.width = '85%';
-
-    // Poll for scan completion
-    let attempts = 0;
-    while (attempts < 20) {
+    // Poll until the backend TRULY finishes (complete/error).
+    // Scans with AI scoring can take several minutes — poll up to ~10 min.
+    for (let attempts = 0; attempts < 200; attempts++) {
       await delay(3000);
-      const statusRes = await fetch(`${API_BASE}/api/scan/status/${USER_ID}`);
-      const status = await statusRes.json();
-      if (status.status === 'idle' || status.status === 'error') break;
-      attempts++;
+      try {
+        const statusRes = await fetch(`${API_BASE}/api/scan/status/${USER_ID}`);
+        const status = await statusRes.json();
+        if (status.status === 'complete' || status.status === 'error') break;
+        if (status.status === 'scoring') {
+          document.getElementById('scan-sub').textContent = 'AI is scoring job matches… (this takes a few minutes)';
+          fill.style.width = '85%';
+        } else {
+          document.getElementById('scan-sub').textContent = 'Scanning job boards…';
+          fill.style.width = '75%';
+        }
+      } catch(e) { /* transient network blip — keep polling */ }
     }
 
     fill.style.width = '100%';
@@ -541,7 +538,6 @@ async function startScan() {
   renderJobs(allJobs);
   document.getElementById('stats-row').style.display = 'grid';
   document.getElementById('jobs-section').style.display = 'block';
-  document.getElementById('apply-all-btn').style.display = '';
   document.getElementById('sb-badge').textContent = allJobs.length;
 
   btn.disabled = false; btn2.disabled = false;
@@ -576,6 +572,9 @@ async function loadJobs() {
       status: j.status || 'found'
     })).sort((a, b) => b.match - a.match);
 
+    // Restore applied status from the database (persists across reloads)
+    allJobs.forEach(j => { if (j.status === 'applied') appliedIds.add(j.id); });
+
   } catch(err) {
     console.error('Could not load jobs:', err);
   }
@@ -594,7 +593,6 @@ window.addEventListener('load', async () => {
       document.getElementById('stats-row').style.display = 'grid';
       document.getElementById('jobs-section').style.display = 'block';
       document.getElementById('empty-state').style.display = 'none';
-      document.getElementById('apply-all-btn').style.display = '';
       document.getElementById('sb-badge').textContent = allJobs.length;
       const banner = document.getElementById('scan-banner');
       banner.className = 'scan-banner done animate-in';
@@ -794,10 +792,8 @@ async function markAsApplied() {
   if (card) card.classList.add('applied');
   updateStats();
   try {
-    await fetch(`${API_BASE}/api/jobs/${currentApplyJob.id}/status`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'applied' })
+    await fetch(`${API_BASE}/api/jobs/${currentApplyJob.id}/status?status=applied`, {
+      method: 'PATCH'
     });
   } catch(e) {}
   cancelApply();
@@ -848,10 +844,8 @@ async function openJobAndMark() {
   updateStats();
 
   try {
-    await fetch(`${API_BASE}/api/jobs/${currentApplyJob.id}/status`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'applied' })
+    await fetch(`${API_BASE}/api/jobs/${currentApplyJob.id}/status?status=applied`, {
+      method: 'PATCH'
     });
   } catch(e) {}
 
@@ -863,18 +857,6 @@ function skipJob(id) {
   const card = document.getElementById('card-'+id);
   if (card) { card.style.opacity = '0.4'; card.style.pointerEvents = 'none'; }
   updateStats();
-}
-
-async function applyToAll() {
-  const highMatch = allJobs.filter(j => j.match >= 75 && !appliedIds.has(j.id));
-  if (!highMatch.length) { alert('No new high-match jobs to apply to!'); return; }
-  const confirmed = confirm(`⚡ Auto-apply to ${highMatch.length} high-match jobs (75%+)?\n\nThis will submit applications on your behalf to:\n${highMatch.map(j=>`• ${j.title} at ${j.company}`).join('\n')}`);
-  if (!confirmed) return;
-  for (const j of highMatch) {
-    await delay(300);
-    applyToJob(j.id);
-  }
-  alert(`✅ Successfully applied to ${highMatch.length} jobs! Check the Job Tracker for status.`);
 }
 
 // ---- MODAL ----
@@ -906,8 +888,7 @@ function openModal(id) {
 function applyFromModal() {
   if (!activeModal) return;
   applyToJob(activeModal.id);
-  document.getElementById('m-apply-btn').textContent = '✅ Applied!';
-  document.getElementById('m-apply-btn').disabled = true;
+  document.getElementById('m-apply-btn').textContent = '📋 Preparing…';
   setTimeout(() => document.getElementById('modal').classList.remove('open'), 1000);
 }
 
@@ -921,7 +902,7 @@ function resetScan() {
   allJobs = []; appliedIds.clear(); skippedIds.clear();
   document.getElementById('scan-banner').className = 'scan-banner idle animate-in';
   document.getElementById('scan-icon').textContent = '🌐';
-  document.getElementById('scan-title').textContent = 'Ready to scan 10 job boards';
+  document.getElementById('scan-title').textContent = 'Ready to scan Greenhouse, Lever & Ashby';
   const roleText = userProfile.roles.length > 0 ? userProfile.roles.join(", ") : "Software Engineer, Data Scientist";
   document.getElementById('scan-sub').textContent = `Searching for ${roleText} · Remote + USA · Last 48 hrs`;
   document.querySelectorAll('.board-chip').forEach(c => { c.className = 'board-chip'; });
@@ -930,7 +911,6 @@ function resetScan() {
   document.getElementById('stats-row').style.display = 'none';
   document.getElementById('jobs-section').style.display = 'none';
   document.getElementById('empty-state').style.display = 'block';
-  document.getElementById('apply-all-btn').style.display = 'none';
   document.getElementById('scan-btn').textContent = '🔍 Start Scanning';
   document.getElementById('sb-badge').textContent = '0';
 }
