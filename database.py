@@ -8,6 +8,7 @@ import os
 import json
 import uuid
 import hashlib
+import bcrypt
 from datetime import datetime, date
 from typing import Optional, List, Dict
 
@@ -116,6 +117,15 @@ class Database:
 
     def _hash(self, password: str) -> str:
         return hashlib.sha256(password.encode()).hexdigest()
+    
+    def _hash_password(self, password: str) -> str:
+        return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+    def _check_password(self, password: str, stored_hash: str) -> bool:
+        try:
+            return bcrypt.checkpw(password.encode(), stored_hash.encode())
+        except ValueError:
+            return False
 
     async def create_user(self, name: str, email: str, password: str) -> str:
         async with self.pool.acquire() as conn:
@@ -139,10 +149,21 @@ class Database:
 
     async def verify_user(self, email: str, password: str):
         async with self.pool.acquire() as conn:
-            return await conn.fetchrow(
-                "SELECT * FROM users WHERE email = $1 AND password_hash = $2",
-                email, self._hash(password)
-            )
+            user = await conn.fetchrow("SELECT * FROM users WHERE email = $1", email)
+            if not user:
+                return None
+            stored = user["password_hash"]
+            # bcrypt hashes start with "$2" — new/migrated accounts
+            if stored.startswith("$2"):
+                return user if self._check_password(password, stored) else None
+            # Legacy SHA-256 account: verify the old way, then upgrade in place
+            if stored == self._hash(password):
+                await conn.execute(
+                    "UPDATE users SET password_hash = $1 WHERE id = $2",
+                    self._hash_password(password), user["id"]
+                )
+                return user
+            return None
 
     async def get_all_active_users(self):
         async with self.pool.acquire() as conn:

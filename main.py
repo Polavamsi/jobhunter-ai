@@ -68,6 +68,10 @@ class UserCreate(BaseModel):
     email: str
     password: str
 
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
 class ResumeUpload(BaseModel):
     user_id: str
     resume_text: str
@@ -124,8 +128,8 @@ async def register(user: UserCreate):
     return {"success": True, "user_id": user_id, "name": user.name}
 
 @app.post("/api/users/login")
-async def login(email: str, password: str):
-    user = await db.verify_user(email, password)
+async def login(payload: LoginRequest):
+    user = await db.verify_user(payload.email, payload.password)
     if not user:
         raise HTTPException(401, "Invalid credentials")
     return {"success": True, "user_id": user["id"], "name": user["name"]}
